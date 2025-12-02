@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexiom AI Solutions - Future-Proof Your Business</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0a1b; /* Deep violet-blue background */
+        }
+        /* Custom gradient class for buttons and accents */
+        .violet-gradient {
+            background-image: linear-gradient(to right, #8b5cf6, #d946ef); /* Purple to Fuchsia */
+        }
+        /* Custom hover effect for buttons */
+        .violet-gradient-hover:hover {
+            opacity: 0.9;
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+        }
+        /* Style for the subtle background pattern */
+        .hero-pattern {
+            background-image: radial-gradient(rgba(139, 92, 246, 0.1) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+
+        @keyframes spin-slow {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes spin-slow-reverse {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(-360deg); }
+        }
+        .animate-spin-slow {
+            animation: spin-slow 30s linear infinite;
+        }
+        .animate-spin-slow-reverse {
+            animation: spin-slow-reverse 40s linear infinite;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'custom-bg': '#0d0a1b',
+                        'accent-purple': '#8b5cf6',
+                        'accent-fuchsia': '#d946ef',
+                    }
+                }
+            }
+        }
+
+        // JavaScript for smooth scrolling functionality
+        document.addEventListener('DOMContentLoaded', () => {
+            const contactButton = document.getElementById('contact-me-button');
+            const heroCtaButton = document.getElementById('hero-cta-button');
+            const exploreButton = document.getElementById('explore-solutions-button');
+            const viewCaseStudiesButton = document.getElementById('view-case-studies-button');
+
+            const contactSection = document.getElementById('contact-form-section');
+            const solutionsSection = document.getElementById('solutions-section');
+
+            // Function to handle smooth scroll
+            const smoothScroll = (targetElement) => {
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth' });
+                }
+            };
+
+            // 1. Navbar Contact Me button
+            if (contactButton) {
+                contactButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    smoothScroll(contactSection);
+                });
+            }
+
+            // 2. Hero Section "Get Started Today" button (primary CTA)
+            if (heroCtaButton) {
+                heroCtaButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    smoothScroll(contactSection);
+                });
+            }
+
+            // 3. Hero Section "Explore Solutions" button
+            if (exploreButton) {
+                exploreButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    smoothScroll(solutionsSection);
+                });
+            }
+
+            // 4. Footer CTA "View Case Studies" button
+            if (viewCaseStudiesButton) {
+                viewCaseStudiesButton.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    smoothScroll(solutionsSection);
+                });
+            }
+        });
+    </script>
+</head>
+<body class="text-gray-200">
+
+    <!-- Header / Navigation -->
+    <header class="sticky top-0 z-50 bg-custom-bg bg-opacity-95 shadow-lg">
+        <div class="max-w-7xl mx-auto p-4 flex justify-between items-center">
+            <!-- Company Name -->
+            <a href="#" class="text-3xl font-extrabold tracking-tight">
+                <span class="violet-gradient bg-clip-text text-transparent">Nexiom</span> AI Solutions
+            </a>
+
+            <!-- Contact Button (Changed from "Contact Our Team" to "Contact Me") -->
+            <button id="contact-me-button" class="violet-gradient violet-gradient-hover text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                Contact Me
+            </button>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-pattern pt-20 pb-32 overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 grid md:grid-cols-2 gap-12 items-center">
+            <!-- Text Content -->
+            <div>
+                <h1 class="text-5xl md:text-6xl font-extrabold leading-tight mb-6">
+                    Future-Proof Your <span class="violet-gradient bg-clip-text text-transparent">Business</span> with Intelligent AI
+                </h1>
+                <p class="text-xl text-gray-400 mb-8">
+                    Leverage advanced, scalable AI solutions to automate data processing and make informed, future-ready decisions.
+                </p>
+                <!-- Call-to-Action Buttons -->
+                <div class="flex space-x-4">
+                    <button id="hero-cta-button" class="violet-gradient violet-gradient-hover text-white px-8 py-3 rounded-xl font-semibold shadow-2xl transition duration-300 ease-in-out transform hover:scale-[1.02]">
+                        Get Started Today
+                    </button>
+                    <button id="explore-solutions-button" class="border border-accent-purple text-accent-purple px-8 py-3 rounded-xl font-semibold transition duration-300 ease-in-out hover:bg-accent-purple hover:text-white hover:shadow-lg">
+                        Explore Solutions
+                    </button>
+                </div>
+            </div>
+
+            <!-- Visual Element (AI Logo Concept - Placeholder) -->
+            <div class="flex justify-center items-center relative min-h-[300px]">
+                <!-- Outer glowing ring -->
+                <div class="absolute w-72 h-72 border-2 rounded-full animate-spin-slow" style="border-color: rgba(139, 92, 246, 0.3); border-left-color: #8b5cf6;"></div>
+                <!-- Inner glowing ring -->
+                <div class="absolute w-52 h-52 border-2 rounded-full animate-spin-slow-reverse" style="border-color: rgba(217, 70, 239, 0.3); border-right-color: #d946ef;"></div>
+                <!-- Central Logo Text -->
+                <div class="relative flex flex-col items-center justify-center p-8 rounded-full bg-custom-bg shadow-2xl shadow-accent-purple/50">
+                    <!-- Icon for AI/Tech -->
+                    <svg class="w-16 h-16 text-accent-fuchsia mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9.25 10m-.25 7a1.75 1.75 0 01-1.75-1.75V11m2-1a1.75 1.75 0 00-1.75-1.75H8m8 5.5a1.5 1.5 0 01-1.5-1.5V10.5m0-1.5a1.5 1.5 0 00-1.5-1.5H13.5m4 4.5a1.5 1.5 0 001.5-1.5V11m-1.5 0a1.5 1.5 0 01-1.5-1.5H15m-7.5 7.5l-3.5 3.5m10-10l3.5 3.5m-3.5 0l-3.5 3.5m-3.5-3.5l-3.5-3.5"></path></svg>
+                    <span class="text-lg font-bold text-white">LOGO AI</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Solutions Section -->
+    <section class="max-w-7xl mx-auto px-4 py-20" id="solutions-section">
+        <h2 class="text-4xl font-extrabold mb-12 text-center">Core Solutions</h2>
+
+        <div class="grid md:grid-cols-3 gap-8">
+            <!-- Solution Card 1 -->
+            <div class="p-8 rounded-2xl shadow-xl bg-gray-800 border border-purple-700 hover:scale-[1.02] transition duration-300">
+                <div class="text-3xl font-bold mb-4 violet-gradient bg-clip-text text-transparent">1/3</div>
+                <h3 class="text-2xl font-semibold mb-3">Process Automation</h3>
+                <p class="text-gray-400">Streamline repetitive tasks using sophisticated AI bots to reduce errors and free up human capital for strategic, high-value work.</p>
+            </div>
+
+            <!-- Solution Card 2 -->
+            <div class="p-8 rounded-2xl shadow-xl bg-gray-800 border border-purple-700 hover:scale-[1.02] transition duration-300">
+                <div class="text-3xl font-bold mb-4 violet-gradient bg-clip-text text-transparent">2/3</div>
+                <h3 class="text-2xl font-semibold mb-3">Predictive Analytics</h3>
+                <p class="text-gray-400">Uncover hidden trends and predict future outcomes from your data, enabling proactive planning and superior decision-making.</p>
+            </div>
+
+            <!-- Solution Card 3 -->
+            <div class="p-8 rounded-2xl shadow-xl bg-gray-800 border border-purple-700 hover:scale-[1.02] transition duration-300">
+                <div class="text-3xl font-bold mb-4 violet-gradient bg-clip-text text-transparent">3/3</div>
+                <h3 class="text-2xl font-semibold mb-3">Custom AI Models</h3>
+                <p class="text-gray-400">Develop and deploy bespoke AI models tailored precisely to your unique business processes and challenges for maximum impact.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA & Contact Form Section -->
+    <section class="max-w-7xl mx-auto px-4 py-20 grid md:grid-cols-2 gap-12 items-start" id="contact-form-section">
+        <!-- CTA Content -->
+        <div>
+            <h2 class="text-4xl md:text-5xl font-extrabold leading-tight mb-6">
+                Ready to <span class="violet-gradient bg-clip-text text-transparent">Transform</span> Your Business?
+            </h2>
+            <p class="text-xl text-gray-400 mb-8">
+                I'm ready to discuss how Nexiom AI Solutions can deliver results for your organization. Drop me a line!
+            </p>
+            <button id="view-case-studies-button" class="violet-gradient violet-gradient-hover text-white px-8 py-3 rounded-xl font-semibold shadow-2xl transition duration-300 ease-in-out transform hover:scale-[1.02]">
+                View Case Studies
+            </button>
+        </div>
+
+        <!-- Contact Form -->
+        <div class="p-8 rounded-2xl shadow-2xl bg-gray-800 border border-fuchsia-600">
+            <h3 class="text-3xl font-bold mb-6 text-white">Contact Me</h3>
+            <form class="space-y-6">
+                <div>
+                    <label for="name" class="block text-sm font-medium text-gray-300 mb-1">Name</label>
+                    <input type="text" id="name" name="name" placeholder="John Doe" required class="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-accent-fuchsia focus:border-accent-fuchsia text-white transition duration-200">
+                </div>
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+                    <input type="email" id="email" name="email" placeholder="you@company.com" required class="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-accent-fuchsia focus:border-accent-fuchsia text-white transition duration-200">
+                </div>
+                <div>
+                    <label for="message" class="block text-sm font-medium text-gray-300 mb-1">Your Message</label>
+                    <textarea id="message" name="message" rows="4" placeholder="How can I help you future-proof your business?" required class="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-accent-fuchsia focus:border-accent-fuchsia text-white transition duration-200"></textarea>
+                </div>
+                <button type="submit" class="w-full violet-gradient violet-gradient-hover text-white px-8 py-3 rounded-xl font-semibold shadow-2xl transition duration-300 ease-in-out transform hover:scale-[1.01]">
+                    Send Message
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 mt-20 p-8 text-center border-t border-purple-800">
+        <p class="text-gray-500 text-sm">
+            &copy; 2025 Nexiom AI Solutions. All rights reserved. | Built with a violet gradient.
+        </p>
+    </footer>
+</body>
+</html>
