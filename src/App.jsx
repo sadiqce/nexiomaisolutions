@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import './App.css';
 import Header from './components/layout/Header';
 import HomeView from './views/HomeView';
 import PortalLogin from './views/PortalLogin';
