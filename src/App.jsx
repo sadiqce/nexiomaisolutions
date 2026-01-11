@@ -1,28 +1,76 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import './App.css';
+import { AuthProvider, useAuth } from './context/AuthContext'; // Import Context
 import Header from './components/layout/Header';
 import HomeView from './views/HomeView';
 import PortalLogin from './views/PortalLogin';
 import PortalDashboard from './views/PortalDashboard';
 import ForgotPassword from './views/ForgotPassword';
 
-export default function App() {
+// Internal component to handle routing based on Auth State
+const AppContent = () => {
     const [currentPage, setCurrentPage] = useState('Home');
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
+    
+    // Get Auth State from Context
+    const { currentUser, logout } = useAuth(); 
 
-    const navigate = useCallback((page) => setCurrentPage(page), []);
+    const navigate = useCallback((page) => {
+        setCurrentPage(page);
+        const pageToPath = {
+            'Home': '/',
+            'PortalLogin': '/login',
+            'PortalDashboard': '/dashboard',
+            'ForgotPassword': '/forgot-password',
+        };
+        const path = pageToPath[page] || '/';
+        window.history.pushState(null, '', path);
+    }, []);
 
-    const handleLoginSuccess = useCallback(() => {
-        setIsLoggedIn(true);
-        navigate('PortalDashboard');
-    }, [navigate]);
+    // Update page from URL on load and popstate
+    useEffect(() => {
+        const updatePageFromURL = () => {
+            const pathToPage = {
+                '/': 'Home',
+                '/login': 'PortalLogin',
+                '/dashboard': 'PortalDashboard',
+                '/forgot-password': 'ForgotPassword',
+            };
+            if (window.location.search.startsWith('?/')) {
+                const path = '/' + window.location.search.slice(2).split('&')[0].replace(/~and~/g, '&');
+                const page = pathToPage[path] || 'Home';
+                setCurrentPage(page);
+                window.history.replaceState(null, '', path);
+            } else {
+                const page = pathToPage[window.location.pathname] || 'Home';
+                setCurrentPage(page);
+            }
+        };
+        updatePageFromURL();
+        window.addEventListener('popstate', updatePageFromURL);
+        return () => window.removeEventListener('popstate', updatePageFromURL);
+    }, []);
 
-    const handleSignOut = useCallback(() => {
-        setIsLoggedIn(false);
-        setUploadedFiles([]);
-        navigate('PortalLogin');
-    }, [navigate]);
+    // If user logs in via Firebase, automatically show Dashboard
+    useEffect(() => {
+        if (currentUser) {
+            // Optional: You might want to stay on Home if they just landed there, 
+            // but for this flow, we redirect to dashboard on login.
+            // Check if we are on login page to redirect
+            if (currentPage === 'PortalLogin') {
+                navigate('PortalDashboard');
+            }
+        }
+    }, [currentUser, currentPage, navigate]);
+
+    const handleSignOut = async () => {
+        try {
+            await logout();
+            setUploadedFiles([]);
+            navigate('PortalLogin');
+        } catch {
+            console.error("Failed to log out");
+        }
+    };
 
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -31,15 +79,16 @@ export default function App() {
     let content;
     switch (currentPage) {
         case 'PortalLogin':
-            content = <PortalLogin navigate={navigate} onLogin={handleLoginSuccess} />;
+            content = <PortalLogin navigate={navigate} onLogin={() => navigate('PortalDashboard')} />;
             break;
         case 'ForgotPassword':
             content = <ForgotPassword navigate={navigate} />;
             break;
         case 'PortalDashboard':
-            content = isLoggedIn 
+            // Protect Route: Only show if currentUser exists
+            content = currentUser 
                 ? <PortalDashboard uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} signOut={handleSignOut} />
-                : <PortalLogin navigate={navigate} onLogin={handleLoginSuccess} />;
+                : <PortalLogin navigate={navigate} onLogin={() => navigate('PortalDashboard')} />;
             break;
         case 'Home':
         default:
@@ -55,5 +104,14 @@ export default function App() {
                 <p className="text-gray-500 text-sm">&copy; {new Date().getFullYear()} Nexiom AI Solutions.</p>
             </footer>
         </div>
+    );
+};
+
+// Wrap the whole app in the AuthProvider
+export default function App() {
+    return (
+        <AuthProvider>
+            <AppContent />
+        </AuthProvider>
     );
 }
