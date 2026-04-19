@@ -1,62 +1,51 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext'; // Import Context
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/layout/Header';
+import { getUser } from './services/airtableService';
+import { cancelSubscription } from './services/paymentService';
 import HomeView from './views/HomeView';
 import PortalLogin from './views/PortalLogin';
 import PortalDashboard from './views/PortalDashboard';
 import ForgotPassword from './views/ForgotPassword';
+import CreateAccount from './views/CreateAccount'; // New Import
+import PricingView from './views/PricingView';
+import TermsOfUseView from './views/TermsOfUseView';
 
-// Internal component to handle routing based on Auth State
 const AppContent = () => {
     const [currentPage, setCurrentPage] = useState('Home');
     const [uploadedFiles, setUploadedFiles] = useState([]);
-    
-    // Get Auth State from Context
-    const { currentUser, logout } = useAuth(); 
+    const { currentUser, logout } = useAuth();
+
+    // Handle URL-based routing for direct portal access
+    useEffect(() => {
+        const path = window.location.pathname;
+        if (path === '/portal' || path === '/portal/') {
+            setCurrentPage('PortalDashboard');
+        } else if (path === '/pricing' || path === '/pricing/') {
+            setCurrentPage('Pricing');
+        } else if (path === '/terms' || path === '/terms/') {
+            setCurrentPage('TermsOfUse');
+        }
+    }, []);
 
     const navigate = useCallback((page) => {
         setCurrentPage(page);
-        const pageToPath = {
-            'Home': '/',
-            'PortalLogin': '/login',
-            'PortalDashboard': '/dashboard',
-            'ForgotPassword': '/forgot-password',
-        };
-        const path = pageToPath[page] || '/';
-        window.history.pushState(null, '', path);
+        // Update URL for portal
+        if (page === 'PortalDashboard') {
+            window.history.pushState({}, '', '/portal');
+        } else if (page === 'Pricing') {
+            window.history.pushState({}, '', '/pricing');
+        } else if (page === 'TermsOfUse') {
+            window.history.pushState({}, '', '/terms');
+        } else if (page === 'Home') {
+            window.history.pushState({}, '', '/');
+        }
     }, []);
 
-    // Update page from URL on load and popstate
-    useEffect(() => {
-        const updatePageFromURL = () => {
-            const pathToPage = {
-                '/': 'Home',
-                '/login': 'PortalLogin',
-                '/dashboard': 'PortalDashboard',
-                '/forgot-password': 'ForgotPassword',
-            };
-            if (window.location.search.startsWith('?/')) {
-                const path = '/' + window.location.search.slice(2).split('&')[0].replace(/~and~/g, '&');
-                const page = pathToPage[path] || 'Home';
-                setCurrentPage(page);
-                window.history.replaceState(null, '', path);
-            } else {
-                const page = pathToPage[window.location.pathname] || 'Home';
-                setCurrentPage(page);
-            }
-        };
-        updatePageFromURL();
-        window.addEventListener('popstate', updatePageFromURL);
-        return () => window.removeEventListener('popstate', updatePageFromURL);
-    }, []);
-
-    // If user logs in via Firebase, automatically show Dashboard
+    // Redirect logic
     useEffect(() => {
         if (currentUser) {
-            // Optional: You might want to stay on Home if they just landed there, 
-            // but for this flow, we redirect to dashboard on login.
-            // Check if we are on login page to redirect
-            if (currentPage === 'PortalLogin') {
+            if (currentPage === 'PortalLogin' || currentPage === 'CreateAccount') {
                 navigate('PortalDashboard');
             }
         }
@@ -67,26 +56,67 @@ const AppContent = () => {
             await logout();
             setUploadedFiles([]);
             navigate('PortalLogin');
-        } catch {
-            console.error("Failed to log out");
+        } catch (e) {
+            console.error("Failed to log out", e);
         }
     };
+
+    const getUserTier = useCallback(async (userId) => {
+        try {
+            const user = await getUser(userId);
+            return user?.Tier || 'Sandbox';
+        } catch (err) {
+            console.error('Error fetching user tier:', err);
+            return 'Sandbox';
+        }
+    }, []);
+
+    const handleCancelSubscription = useCallback(async (userId) => {
+        try {
+            await cancelSubscription(userId);
+            // Refresh the dashboard to show updated subscription status
+            if (currentPage === 'PortalDashboard') {
+                window.location.reload();
+            }
+        } catch (err) {
+            console.error('Error canceling subscription:', err);
+            throw err;
+        }
+    }, [currentPage]);
 
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }, [currentPage]);
 
+    // After user returns from Stripe
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('checkout') === 'success') {
+            // Reload user data to get updated tier/credits
+            // Currently handled by modals, but you may want explicit handling
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+    }, []);
     let content;
     switch (currentPage) {
         case 'PortalLogin':
             content = <PortalLogin navigate={navigate} onLogin={() => navigate('PortalDashboard')} />;
             break;
+        case 'CreateAccount': // New Route
+            content = <CreateAccount navigate={navigate} />;
+            break;
         case 'ForgotPassword':
             content = <ForgotPassword navigate={navigate} />;
             break;
+        case 'Pricing':
+            content = <PricingView />;
+            break;
+        case 'TermsOfUse':
+            content = <TermsOfUseView />;
+            break;
         case 'PortalDashboard':
-            // Protect Route: Only show if currentUser exists
-            content = currentUser 
+            content = currentUser
                 ? <PortalDashboard uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} signOut={handleSignOut} />
                 : <PortalLogin navigate={navigate} onLogin={() => navigate('PortalDashboard')} />;
             break;
@@ -98,7 +128,7 @@ const AppContent = () => {
 
     return (
         <div className="min-h-screen bg-[#0d0a1b] text-gray-200 font-sans">
-            <Header navigate={navigate} currentPage={currentPage} signOut={handleSignOut} />
+            <Header navigate={navigate} currentPage={currentPage} signOut={handleSignOut} currentUser={currentUser} getUserTier={getUserTier} onCancelSubscription={handleCancelSubscription} />
             <main>{content}</main>
             <footer className="bg-gray-900 mt-20 p-8 text-center border-t border-purple-800">
                 <p className="text-gray-500 text-sm">&copy; {new Date().getFullYear()} Nexiom AI Solutions.</p>
@@ -107,7 +137,6 @@ const AppContent = () => {
     );
 };
 
-// Wrap the whole app in the AuthProvider
 export default function App() {
     return (
         <AuthProvider>

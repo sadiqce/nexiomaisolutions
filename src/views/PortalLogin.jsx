@@ -9,29 +9,30 @@ const PortalLogin = ({ navigate, onLogin }) => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     
-    // Get login function from our new Context
     const { login } = useAuth();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
         try {
             setError('');
             setLoading(true);
             
-            // 1. Call Firebase Login
-            await login(email, password);
+            const userCredential = await login(email, password);
+            const user = userCredential.user;
+
+            // Optional: Check if email is verified before allowing full access
+            if (!user.emailVerified) {
+                setError('Please verify your email address before logging in.');
+                // await logout(); // Optional: force logout if you want strict enforcement
+                return;
+            }
             
-            // 2. If successful, navigate
             onLogin(); 
             
         } catch (err) {
             console.error(err);
-            // Map Firebase error codes to readable messages
             if(err.code === 'auth/invalid-credential') {
                 setError('Incorrect email or password.');
-            } else if (err.code === 'auth/too-many-requests') {
-                setError('Too many failed attempts. Try again later.');
             } else {
                 setError('Failed to log in. Please check your connection.');
             }
@@ -62,10 +63,21 @@ const PortalLogin = ({ navigate, onLogin }) => {
                         <button disabled={loading} type="submit" className={`w-full ${BUTTON_GRADIENT} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
                             {loading ? 'Signing In...' : 'Sign In Securely'}
                         </button>
-                        <p className="text-center text-sm text-gray-500 pt-2">
-                            <a href="#" onClick={(e) => { e.preventDefault(); navigate('ForgotPassword'); }} className="text-purple-500 hover:underline">Forgot Password?</a>
-                        </p>
+                        
+                        <div className="flex justify-between items-center text-sm pt-2">
+                            <a href="#" onClick={(e) => { e.preventDefault(); navigate('ForgotPassword'); }} className="text-gray-400 hover:text-purple-400">Forgot Password?</a>
+                        </div>
                     </form>
+
+                    <div className="mt-8 pt-6 border-t border-gray-700 text-center">
+                        <p className="text-gray-400 text-sm mb-3">Don't have an account?</p>
+                        <button 
+                            onClick={() => navigate('CreateAccount')}
+                            className="text-fuchsia-400 font-semibold hover:underline"
+                        >
+                            Create New Account
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>

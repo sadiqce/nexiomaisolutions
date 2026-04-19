@@ -21,10 +21,10 @@ const MetricCard = ({ title, value, unit, color, time }) => {
     }
 
     return (
-        <div className={`p-6 rounded-xl bg-gray-800 border ${borderColor} shadow-lg`}>
-            <p className={`text-sm ${unitColor} font-medium mb-2`}>{title}</p>
-            <div className="text-5xl font-extrabold text-white">
-                {value}<span className={`text-3xl ${unitColor}`}>{unit}</span>
+        <div className={`px-3 py-2 rounded-xl bg-gray-800 border ${borderColor} shadow-lg`}>
+            <p className={`text-sm ${unitColor} font-medium mb-1`}>{title}</p>
+            <div className="text-2xl font-extrabold text-white">
+                {value}<span className={`text-xl ${unitColor}`}>{unit}</span>
             </div>
             <p className="text-gray-500 mt-1">{time}</p>
         </div>

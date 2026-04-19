@@ -1,0 +1,601 @@
+// Payment Service for Stripe Integration - Embedded Checkout
+// Uses Stripe Payment Element for embedded checkout (no page redirect)
+// Requires backend server to create payment intents
+
+import { getUser, updateUserSubscription } from './airtableService';
+import { loadStripe } from '@stripe/stripe-js';
+
+// Get Stripe configuration from environment
+const STRIPE_CONFIG = {
+  publishableKey: import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '',
+  backendUrl: import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001',
+};
+
+let stripePromise = null;
+
+/**
+ * Get Stripe instance (lazy load)
+ * @returns {Promise<Stripe>} Stripe instance
+ */
+export const getStripe = async () => {
+  if (!stripePromise && STRIPE_CONFIG.publishableKey) {
+    stripePromise = loadStripe(STRIPE_CONFIG.publishableKey);
+  }
+  return stripePromise;
+};
+/**
+ * Retry helper function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries (default: 3)
+ * @param {number} delayMs - Initial delay in milliseconds (default: 1000)
+ * @returns {Promise<any>} Result of the function
+ */
+const retryWithBackoff = async (fn, maxRetries = 3, delayMs = 1000) => {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt < maxRetries) {
+        const delay = delayMs * Math.pow(2, attempt - 1); // Exponential backoff
+        console.warn(
+          `Attempt ${attempt} failed: ${error.message}. ` +
+          `Retrying in ${delay}ms... (${maxRetries - attempt} retries left)`
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  // All retries exhausted
+  throw new Error(`Operation failed after ${maxRetries} attempts: ${lastError.message}`);
+};
+
+/**
+ * Create Stripe Subscription for a plan
+ * @param {string} planTier - Plan tier (Standard, Volume)
+ * @param {string} userEmail - User email
+ * @param {string} userId - User ID (client ID)
+ * @param {string} stripePriceId - Stripe price ID for the plan
+ * @returns {Promise<object>} Subscription details with client secret if needed
+ */
+export const createStripeSubscription = async (planTier, userEmail, userId, stripePriceId) => {
+  return retryWithBackoff(async () => {
+    if (!userId || !userEmail || !stripePriceId) {
+      throw new Error('User ID, email, and Stripe price ID are required');
+    }
+
+    // Call backend to create subscription
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-subscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId,
+        userEmail,
+        planTier,
+        priceId: stripePriceId,
+        clientId: userId, // Pass client ID for metadata
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create subscription');
+    }
+
+    return await response.json();
+  }, 3, 1000); // 3 retries with 1s initial delay, exponentially backing off
+};
+
+/**
+ * Cancel Stripe Subscription with retry
+ * @param {string} subscriptionId - Stripe subscription ID
+ * @returns {Promise<object>} Cancellation result
+ */
+export const cancelStripeSubscription = async (subscriptionId) => {
+  return retryWithBackoff(async () => {
+    if (!subscriptionId) {
+      throw new Error('Subscription ID is required');
+    }
+
+    // Call backend to cancel subscription
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/cancel-subscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subscriptionId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to cancel subscription');
+    }
+
+    return await response.json();
+  }, 3, 1000); // 3 retries with 1s initial delay, exponentially backing off
+};
+// Plan pricing configuration
+export const PAYMENT_PLANS = {
+  Standard: {
+    name: 'Standard',
+    amount: 4900, // $49.00 in cents
+    currency: 'usd',
+    interval: 'month',
+    monthlyLimit: 100,
+    maxFileSize: 10 * 1024 * 1024,
+    maxPages: 10,
+    retentionDays: 7,
+    stripePriceId: import.meta.env.VITE_STRIPE_PRICE_STANDARD || '', // Stripe price ID from env
+  },
+  Volume: {
+    name: 'Volume',
+    amount: 14900, // $149.00 in cents
+    currency: 'usd',
+    interval: 'month',
+    monthlyLimit: 500,
+    maxFileSize: 25 * 1024 * 1024,
+    maxPages: 25,
+    retentionDays: 14,
+    stripePriceId: import.meta.env.VITE_STRIPE_PRICE_VOLUME || '', // Stripe price ID from env
+  },
+};
+
+export const TOPUP_PACKS = {
+  'topup-50': {
+    label: '50 documents',
+    amount: 2000, // $20.00 in cents
+    documents: 50,
+  },
+  'topup-100': {
+    label: '100 documents',
+    amount: 3500, // $35.00 in cents
+    documents: 100,
+  },
+  'topup-250': {
+    label: '250 documents',
+    amount: 8000, // $80.00 in cents
+    documents: 250,
+  },
+};
+
+/**
+ * Create Payment Intent for plan upgrade
+ * @param {string} planTier - Plan tier (Standard, Volume)
+ * @param {string} userEmail - User email
+ * @param {string} userId - User ID
+ * @returns {Promise<object>} Payment intent with client secret
+ */
+export const createPaymentIntentForPlan = async (planTier, userEmail, userId) => {
+  try {
+    if (!userId || !userEmail || !planTier) {
+      throw new Error('User ID, email, and plan tier are required');
+    }
+
+    const plan = PAYMENT_PLANS[planTier];
+    if (!plan) throw new Error('Invalid plan tier');
+
+    // Call backend to create payment intent
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-payment-intent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: plan.amount,
+        currency: plan.currency,
+        description: `${planTier} Plan - Monthly Subscription`,
+        userId,
+        userEmail,
+        metadata: {
+          type: 'plan',
+          planTier,
+          interval: plan.interval,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create payment intent');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create Payment Intent for topup
+ * @param {string} topupId - Top-up pack ID
+ * @param {string} userEmail - User email
+ * @param {string} userId - User ID
+ * @returns {Promise<object>} Payment intent with client secret
+ */
+export const createPaymentIntentForTopup = async (topupId, userEmail, userId) => {
+  try {
+    if (!userId || !userEmail || !topupId) {
+      throw new Error('User ID, email, and top-up ID are required');
+    }
+
+    const topup = TOPUP_PACKS[topupId];
+    if (!topup) throw new Error('Invalid top-up pack');
+
+    // Call backend to create payment intent
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-payment-intent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: topup.amount,
+        currency: 'usd',
+        description: `Document Top-up - ${topup.label}`,
+        userId,
+        userEmail,
+        metadata: {
+          type: 'topup',
+          topupId,
+          documents: topup.documents,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create payment intent');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating topup payment intent:', error);
+    throw error;
+  }
+};
+
+/**
+ * Process a successful plan payment
+ * Updates user tier in Airtable
+ * @param {string} userId - User ID
+ * @param {string} planTier - Plan tier (Standard, Volume)
+ * @param {string} stripePaymentIntentId - Stripe Payment Intent ID
+ */
+const addDays = (date, days) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+
+const getBillingEndDate = (lastPaymentDate, explicitEndDate) => {
+  if (explicitEndDate) {
+    return new Date(explicitEndDate);
+  }
+  if (!lastPaymentDate) {
+    return null;
+  }
+  const date = new Date(lastPaymentDate);
+  return addDays(date, 30);
+};
+
+export const processPaymentSuccess = async (userId, planTier, stripePaymentIntentId = null, userEmail = null) => {
+  try {
+    const plan = PAYMENT_PLANS[planTier];
+    if (!plan) throw new Error('Invalid plan tier');
+
+    const user = await getUser(userId);
+    const email = userEmail || user?.Email;
+    
+    if (!email) {
+      throw new Error('User email is required to create subscription');
+    }
+
+    const now = new Date();
+    const billingEndDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
+    const isCancelledButStillActive = user?.SubscriptionStatus === 'inactive' && billingEndDate && billingEndDate > now;
+
+    // For deferred activation (cancelled but still active), no Stripe subscription needed yet
+    if (isCancelledButStillActive) {
+      const subscriptionData = {
+        autoRenewal: true,
+        pendingTier: planTier,
+        pendingActivationDate: billingEndDate.toISOString(),
+      };
+
+      if (stripePaymentIntentId) {
+        subscriptionData.stripePaymentIntentId = stripePaymentIntentId;
+      }
+
+      await updateUserSubscription(userId, subscriptionData);
+
+      const daysLeft = Math.max(0, Math.ceil((billingEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysText = daysLeft === 1 ? '1 day' : `${daysLeft} days`;
+
+      return {
+        success: true,
+        message: `Your ${planTier} plan is scheduled to start in ${daysText}, on ${billingEndDate.toLocaleDateString()}.`,
+      };
+    }
+
+    // For immediate activation, MUST create Stripe subscription first
+    const subscriptionData = {
+      autoRenewal: true,
+      subscriptionTier: planTier,
+      subscriptionStatus: 'active',
+      lastPaymentDate: now.toISOString(),
+      subscriptionEndDate: addDays(now, 30).toISOString(),
+      pendingTier: null,
+      pendingActivationDate: null,
+    };
+
+    if (stripePaymentIntentId) {
+      subscriptionData.stripePaymentIntentId = stripePaymentIntentId;
+    }
+
+    // Create Stripe subscription BEFORE updating Airtable
+    if (plan.stripePriceId) {
+      console.log(`Creating Stripe subscription for user ${userId}, plan: ${planTier}`);
+      const stripeSubscription = await createStripeSubscription(
+        planTier, 
+        email, 
+        userId, 
+        plan.stripePriceId
+      );
+      
+      subscriptionData.stripeSubscriptionId = stripeSubscription.subscriptionId;
+      subscriptionData.stripeSubscriptionStatus = stripeSubscription.status;
+      
+      console.log(`✓ Successfully created Stripe subscription ${stripeSubscription.subscriptionId} for user ${userId}`);
+    } else {
+      throw new Error(`Stripe price ID not configured for ${planTier} plan. Check VITE_STRIPE_PRICE_${planTier.toUpperCase()} environment variable.`);
+    }
+
+    // Only update Airtable AFTER Stripe subscription succeeds
+    await updateUserSubscription(userId, subscriptionData);
+    console.log(`✓ Updated Airtable with subscription data for user ${userId}`);
+
+    return {
+      success: true,
+      message: `Successfully upgraded to ${planTier} plan!`,
+    };
+  } catch (error) {
+    console.error('Error processing payment success:', error);
+    console.error(`⚠ Airtable was NOT updated for user ${userId} due to error`);
+    throw error;
+  }
+};
+
+export const activateScheduledPlan = async (userId, user) => {
+  if (!user || !user.PendingTier || !user.PendingActivationDate) {
+    return null;
+  }
+
+  const now = new Date();
+  const activationDate = new Date(user.PendingActivationDate);
+  if (activationDate > now) {
+    return null;
+  }
+
+  const subscriptionData = {
+    subscriptionTier: user.PendingTier,
+    subscriptionStatus: 'active',
+    lastPaymentDate: now.toISOString(),
+    subscriptionEndDate: addDays(now, 30).toISOString(),
+    autoRenewal: true,
+    pendingTier: null,
+    pendingActivationDate: null,
+  };
+
+  return await updateUserSubscription(userId, subscriptionData);
+};
+
+/**
+ * Process a successful top-up payment
+ * Adds documents to user's account in Airtable
+ * @param {string} userId - User ID
+ * @param {string} topupId - Top-up pack ID
+ */
+export const processTopupSuccess = async (userId, topupId) => {
+  try {
+    const topup = TOPUP_PACKS[topupId];
+    if (!topup) throw new Error('Invalid top-up pack');
+
+    // Update top-up credits in Airtable
+    await updateUserSubscription(userId, {
+      topupCreditsAdded: topup.documents,
+      lastTopupDate: new Date().toISOString(),
+    });
+
+    return { 
+      success: true, 
+      message: `Added ${topup.documents} documents to your account!` 
+    };
+  } catch (error) {
+    console.error('Error processing top-up success:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get payment status for a user (from Airtable)
+ * @param {string} userId - User ID
+ * @returns {Promise<object>} User subscription info
+ */
+export const getUserPaymentStatus = async (userId) => {
+  try {
+    const { getUser } = await import('./airtableService');
+    const user = await getUser(userId);
+    return user ? {
+      tier: user.Tier,
+      subscriptionStatus: user.SubscriptionStatus || 'inactive',
+      lastPaymentDate: user.LastPaymentDate,
+      autoRenewal: user.AutoRenewal,
+      topupCredits: user.TopUpCredits || 0,
+    } : null;
+  } catch (error) {
+    console.error('Error fetching payment status:', error);
+    throw error;
+  }
+};
+
+/**
+ * Cancel a user's subscription
+ * Cancels Stripe subscription FIRST, then updates Airtable.
+ * If Stripe cancellation fails after retries, Airtable is NOT updated.
+ * @param {string} userId - User ID
+ * @returns {Promise<object>} Cancellation result
+ */
+export const cancelSubscription = async (userId) => {
+  try {
+    const { getUser, updateUserSubscription } = await import('./airtableService');
+    
+    // Get user from Airtable
+    const user = await getUser(userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.SubscriptionStatus || user.SubscriptionStatus !== 'active') {
+      throw new Error('User does not have an active subscription');
+    }
+
+    if (!user.StripeSubscriptionId) {
+      throw new Error('No Stripe subscription found for this user');
+    }
+
+    // Cancel Stripe subscription FIRST with retry logic
+    console.log(`Cancelling Stripe subscription ${user.StripeSubscriptionId} for user ${userId}`);
+    const cancelResult = await cancelStripeSubscription(user.StripeSubscriptionId);
+    console.log(`✓ Successfully cancelled Stripe subscription ${user.StripeSubscriptionId}`);
+
+    // Only update Airtable AFTER Stripe cancellation succeeds
+    const billingEndDate = getBillingEndDate(user.LastPaymentDate, user.SubscriptionEndDate);
+    const subscriptionData = {
+      subscriptionStatus: 'inactive',
+      autoRenewal: false,
+      stripeSubscriptionStatus: cancelResult.status,
+    };
+
+    if (billingEndDate) {
+      subscriptionData.subscriptionEndDate = billingEndDate.toISOString();
+    }
+
+    await updateUserSubscription(userId, subscriptionData);
+    console.log(`✓ Updated Airtable with cancellation status for user ${userId}`);
+
+    return { 
+      success: true, 
+      message: 'Your subscription has been cancelled. Your plan remains active until the end of your billing period.' 
+    };
+  } catch (error) {
+    console.error('Error cancelling subscription:', error);
+    console.error(`⚠ Airtable was NOT updated for user ${userId} due to error`);
+    throw error;
+  }
+};
+
+/**
+ * Redirect to Stripe Payment Link for plan upgrade
+ * @param {string} planTier - Plan tier (Standard, Volume)
+ * @param {string} userEmail - User email
+ * @param {string} userId - User ID
+ */
+export const redirectToCheckout = async (planTier, userEmail, userId) => {
+  try {
+    if (!userId || !userEmail || !planTier) {
+      throw new Error('User ID, email, and plan tier are required');
+    }
+
+    const plan = PAYMENT_PLANS[planTier];
+    if (!plan) throw new Error('Invalid plan tier');
+
+    // Call backend to create/get payment link
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-payment-link`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: plan.amount,
+        currency: plan.currency,
+        description: `${planTier} Plan - Monthly Subscription`,
+        userId,
+        userEmail,
+        type: 'plan',
+        planTier,
+        interval: plan.interval,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create payment link');
+    }
+
+    const data = await response.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error('No payment link URL returned');
+    }
+  } catch (error) {
+    console.error('Error redirecting to checkout:', error);
+    throw error;
+  }
+};
+
+/**
+ * Redirect to Stripe Payment Link for topup
+ * @param {string} topupId - Top-up pack ID
+ * @param {string} userEmail - User email
+ * @param {string} userId - User ID
+ */
+export const redirectToTopupCheckout = async (topupId, userEmail, userId) => {
+  try {
+    if (!userId || !userEmail || !topupId) {
+      throw new Error('User ID, email, and top-up ID are required');
+    }
+
+    const topup = TOPUP_PACKS[topupId];
+    if (!topup) throw new Error('Invalid top-up pack');
+
+    // Call backend to create/get payment link
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-payment-link`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: topup.amount,
+        currency: 'usd',
+        description: `Document Top-up - ${topup.label}`,
+        userId,
+        userEmail,
+        type: 'topup',
+        topupId,
+        documents: topup.documents,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create payment link');
+    }
+
+    const data = await response.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error('No payment link URL returned');
+    }
+  } catch (error) {
+    console.error('Error redirecting to topup checkout:', error);
+    throw error;
+  }
+};
+

@@ -1,0 +1,16 @@
+/* Hide Stripe developer overlays and wallet buttons to keep the page clean */
+.StripePaymentRequestButton,
+.StripePaymentRequestButton *,
+.StripeDevTools,
+.StripeDeveloperButton,
+.stripe-devtools,
+.stripe-developer-button,
+div[aria-label*="Stripe"],
+button[title*="Stripe"] {
+  display: none !important;
+}
+
+/* Disable default browser autofill on Stripe's embedded checkout */
+.StripeElement {
+  autocomplete: off !important;
+}

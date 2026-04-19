@@ -38,7 +38,7 @@ const HeroSection = () => {
                     <div className="absolute w-72 h-72 border-2 rounded-full animate-spin-slow" style={{borderColor: 'rgba(139, 92, 246, 0.3)', borderLeftColor: '#8b5cf6'}}></div>
                     <div className="absolute w-52 h-52 border-2 rounded-full animate-spin-slow-reverse" style={{borderColor: 'rgba(217, 70, 239, 0.3)', borderRightColor: '#d946ef'}}></div>
                     <div className="relative flex flex-col items-center justify-center p-8 rounded-full bg-[#0d0a1b] shadow-2xl shadow-purple-500/50">
-                        <span className="text-lg font-bold text-white">LOGO AI</span>
+                        <span className="text-lg font-bold text-white">Nexiom AI</span>
                     </div>
                 </div>
             </div>

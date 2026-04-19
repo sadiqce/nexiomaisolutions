@@ -3,51 +3,73 @@ import { auth } from '../config/firebase';
 import { 
     onAuthStateChanged, 
     signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword,
     signOut as firebaseSignOut,
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendEmailVerification,
+    updateProfile
 } from 'firebase/auth';
 
 const AuthContext = createContext();
 
-// Custom hook to use auth easily in other components
 export const useAuth = () => {
     return useContext(AuthContext);
 };
 
 export const AuthProvider = ({ children }) => {
     const [currentUser, setCurrentUser] = useState(null);
+    const [isEmailVerified, setIsEmailVerified] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    // Login function
     const login = (email, password) => {
         return signInWithEmailAndPassword(auth, email, password);
     };
 
-    // Logout function
+    const signup = async (email, password) => {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await sendEmailVerification(userCredential.user);
+        return userCredential;
+    };
+
     const logout = () => {
         return firebaseSignOut(auth);
     };
 
-    // Password Reset function
     const resetPassword = (email) => {
         return sendPasswordResetEmail(auth, email);
     };
 
-    // Listen to Firebase state changes (user logged in/out)
+    const verifyEmail = (user) => {
+        return sendEmailVerification(user);
+    };
+
+    const updateUserProfile = (user, profileData) => {
+        return updateProfile(user, profileData);
+    }
+
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             setCurrentUser(user);
+            if (user) {
+                setIsEmailVerified(user.emailVerified);
+            } else {
+                setIsEmailVerified(false);
+            }
             setLoading(false);
         });
 
-        return unsubscribe; // Cleanup listener
+        return unsubscribe;
     }, []);
 
     const value = {
         currentUser,
+        isEmailVerified,
         login,
+        signup,
         logout,
-        resetPassword
+        resetPassword,
+        verifyEmail,
+        updateUserProfile
     };
 
     return (
