@@ -21,6 +21,138 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// ===== AIRTABLE HELPER FUNCTIONS (Server-side) =====
+// These use process.env instead of import.meta.env
+// Only use these on the server - frontend should use airtableService.js
+
+const AIRTABLE_CONFIG = {
+  baseId: process.env.VITE_AIRTABLE_BASE_ID,
+  apiKey: process.env.VITE_AIRTABLE_API_KEY,
+  usersTable: 'Users',
+  filesTable: 'Files'
+};
+
+const getAirtableHeaders = () => ({
+  'Authorization': `Bearer ${AIRTABLE_CONFIG.apiKey}`,
+  'Content-Type': 'application/json'
+});
+
+/**
+ * Server-side helper: Get user from Airtable
+ */
+const getServerUser = async (uid) => {
+  try {
+    if (!AIRTABLE_CONFIG.baseId || !AIRTABLE_CONFIG.apiKey) {
+      throw new Error('Airtable credentials not configured');
+    }
+
+    const formula = `({UserID} = '${uid}')`;
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
+
+    const response = await fetch(url, { headers: getAirtableHeaders() });
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`Airtable API error: ${response.status} - ${data.error?.message || 'Unknown error'}`);
+    }
+    
+    if (data.records.length === 0) {
+      return null;
+    }
+    
+    return data.records[0].fields;
+  } catch (error) {
+    console.error("Server: Failed to get user from Airtable:", error);
+    throw error;
+  }
+};
+
+/**
+ * Server-side helper: Get Airtable record ID for a user
+ */
+const getServerUserRecordId = async (uid) => {
+  try {
+    if (!AIRTABLE_CONFIG.baseId || !AIRTABLE_CONFIG.apiKey) {
+      throw new Error('Airtable credentials not configured');
+    }
+
+    const formula = `({UserID} = '${uid}')`;
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
+
+    const response = await fetch(url, { headers: getAirtableHeaders() });
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get user record: ${data.error?.message}`);
+    }
+    
+    if (data.records.length === 0) {
+      throw new Error(`User with UID ${uid} not found in Airtable`);
+    }
+    
+    return data.records[0].id;
+  } catch (error) {
+    console.error("Server: Failed to get user record ID:", error);
+    throw error;
+  }
+};
+
+/**
+ * Server-side helper: Update user subscription in Airtable
+ */
+const updateServerUserSubscription = async (userId, subscriptionData) => {
+  try {
+    if (!AIRTABLE_CONFIG.baseId || !AIRTABLE_CONFIG.apiKey) {
+      throw new Error('Airtable credentials not configured');
+    }
+
+    const userRecordId = await getServerUserRecordId(userId);
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}/${userRecordId}`;
+    
+    const fields = {};
+    
+    // Map subscription data to Airtable fields
+    if (subscriptionData.subscriptionTier) {
+      fields['Tier'] = subscriptionData.subscriptionTier;
+    }
+    if (subscriptionData.subscriptionStatus !== undefined) {
+      fields['SubscriptionStatus'] = subscriptionData.subscriptionStatus;
+    }
+    if ('pendingTier' in subscriptionData) {
+      fields['PendingTier'] = subscriptionData.pendingTier;
+    }
+    if ('pendingActivationDate' in subscriptionData) {
+      fields['PendingActivationDate'] = subscriptionData.pendingActivationDate;
+    }
+    if (subscriptionData.lastPaymentDate) {
+      fields['LastPaymentDate'] = subscriptionData.lastPaymentDate;
+    }
+    if (subscriptionData.stripeSubscriptionId) {
+      fields['StripeSubscriptionId'] = subscriptionData.stripeSubscriptionId;
+    }
+    if (subscriptionData.stripeSubscriptionStatus) {
+      fields['StripeSubscriptionStatus'] = subscriptionData.stripeSubscriptionStatus;
+    }
+    
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({ fields })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update subscription: ${data.error?.message}`);
+    }
+    
+    return data.fields;
+  } catch (error) {
+    console.error("Server: Failed to update user subscription:", error);
+    throw error;
+  }
+};
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -182,7 +314,7 @@ app.post('/api/create-payment-link', async (req, res) => {
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
-    const { userId, userEmail, planTier, priceId, clientId } = req.body;
+    const { userId, userEmail, planTier, priceId, clientId, paymentMethodId } = req.body;
 
     // Validate required fields
     if (!userId || !userEmail || !planTier || !priceId) {
@@ -214,9 +346,29 @@ app.post('/api/create-subscription', async (req, res) => {
       console.log(`✓ Created new Stripe customer: ${customerId}`);
     }
 
-    // Create subscription with 'default_incomplete'
-    // This means: "Create subscription, but don't charge yet. Wait for payment intent to be confirmed."
-    // The subscription's first invoice will have a payment_intent attached that we'll use on the frontend
+    // Attach payment method to customer if provided
+    if (paymentMethodId) {
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+        console.log(`✓ Attached payment method ${paymentMethodId} to customer ${customerId}`);
+
+        // Set this payment method as the default for the customer
+        await stripe.customers.update(customerId, {
+          invoice_settings: {
+            default_payment_method: paymentMethodId,
+          },
+        });
+        console.log(`✓ Set as default payment method for customer`);
+      } catch (error) {
+        console.warn(`⚠ Warning: Could not attach payment method: ${error.message}`);
+        // Continue anyway - subscription creation might still work
+      }
+    }
+
+    // Create subscription
+    // Use 'error_if_incomplete' if we have a payment method, otherwise 'default_incomplete'
+    const paymentBehavior = paymentMethodId ? 'error_if_incomplete' : 'default_incomplete';
+    
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [
@@ -229,7 +381,7 @@ app.post('/api/create-subscription', async (req, res) => {
         planTier,
         clientId: clientId || '',
       },
-      payment_behavior: 'default_incomplete', // Don't charge yet - wait for payment_intent to be confirmed
+      payment_behavior: paymentBehavior,
       payment_settings: {
         save_default_payment_method: 'on_subscription',
       },
@@ -237,11 +389,47 @@ app.post('/api/create-subscription', async (req, res) => {
     });
 
     // Get the payment intent from the subscription's invoice
-    // This is the payment intent that needs to be confirmed on the frontend
-    const paymentIntent = subscription.latest_invoice?.payment_intent;
+    // With default_incomplete, this might be null initially, so we may need to refetch
+    let paymentIntent = subscription.latest_invoice?.payment_intent;
     
+    // If payment intent is not in the expanded response, try to retrieve it
+    if (!paymentIntent && subscription.latest_invoice) {
+      const invoice = await stripe.invoices.retrieve(subscription.latest_invoice.id);
+      paymentIntent = invoice.payment_intent;
+      if (typeof paymentIntent === 'string') {
+        // If it's just the ID string, retrieve the full payment intent object
+        paymentIntent = await stripe.paymentIntents.retrieve(paymentIntent);
+      }
+    }
+    
+    // FALLBACK: If still no payment intent, create a standalone one for this amount
+    // This ensures frontend always has a client_secret to use for payment
     if (!paymentIntent || !paymentIntent.client_secret) {
-      throw new Error('Failed to get payment intent from subscription');
+      console.warn(`⚠ Payment intent not found on subscription, creating standalone payment intent as fallback`);
+      
+      // Get the price details to determine the amount
+      const price = await stripe.prices.retrieve(priceId);
+      const amount = price.unit_amount || 0;
+      
+      if (!amount) {
+        throw new Error('Could not determine price amount for fallback payment intent');
+      }
+
+      paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: price.currency,
+        customer: customerId,
+        description: `Subscription payment for ${planTier} plan`,
+        metadata: {
+          userId,
+          planTier,
+          subscriptionId: subscription.id,
+          subscriptionPayment: 'true',
+        },
+        setup_future_usage: 'off_session', // Save payment method for future charges
+      });
+
+      console.log(`✓ Created fallback payment intent ${paymentIntent.id}`);
     }
 
     console.log(`✓ Created subscription ${subscription.id}`);
@@ -265,6 +453,203 @@ app.post('/api/create-subscription', async (req, res) => {
 });
 
 /**
+ * Finalize Subscription After Payment Success
+ * POST /api/finalize-subscription
+ * Applies the successful payment to the subscription's invoice
+ * This converts an incomplete subscription to active
+ */
+app.post('/api/finalize-subscription', async (req, res) => {
+  try {
+    const { subscriptionId, paymentIntentId } = req.body;
+
+    if (!subscriptionId) {
+      return res.status(400).json({ 
+        error: 'Missing required field: subscriptionId' 
+      });
+    }
+
+    // Retrieve the subscription
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    console.log(`Finalizing subscription ${subscriptionId}, current status: ${subscription.status}`);
+
+    // If already active, nothing to do
+    if (subscription.status === 'active') {
+      console.log(`✓ Subscription ${subscriptionId} is already active`);
+      return res.json({
+        success: true,
+        subscriptionId: subscription.id,
+        status: subscription.status,
+      });
+    }
+
+    // Get the subscription's invoice
+    if (!subscription.latest_invoice) {
+      console.warn(`No invoice found for subscription ${subscriptionId}`);
+      return res.json({
+        success: false,
+        error: 'No invoice found'
+      });
+    }
+
+    const invoiceId = typeof subscription.latest_invoice === 'string'
+      ? subscription.latest_invoice
+      : subscription.latest_invoice.id;
+
+    const invoice = await stripe.invoices.retrieve(invoiceId);
+    console.log(`Invoice ${invoiceId} status: ${invoice.status}, paid: ${invoice.paid}, amount_due: ${invoice.amount_due}`);
+
+    // If invoice is already paid, just return
+    if (invoice.paid) {
+      console.log(`Invoice ${invoiceId} is already paid`);
+      const current = await stripe.subscriptions.retrieve(subscriptionId);
+      return res.json({
+        success: true,
+        subscriptionId: current.id,
+        status: current.status,
+      });
+    }
+
+    // Try to get the charge from the payment intent
+    let chargeId = null;
+    if (paymentIntentId) {
+      try {
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        console.log(`Payment intent ${paymentIntentId} status: ${paymentIntent.status}`);
+        
+        if (paymentIntent.status === 'succeeded' && paymentIntent.charges?.data?.length > 0) {
+          chargeId = paymentIntent.charges.data[0].id;
+          console.log(`Found charge ${chargeId} from payment intent`);
+        }
+      } catch (piError) {
+        console.warn(`Could not retrieve payment intent: ${piError.message}`);
+      }
+    }
+
+    // If invoice is still draft, finalize it
+    if (invoice.status === 'draft') {
+      try {
+        console.log(`Finalizing invoice ${invoiceId}...`);
+        await stripe.invoices.finalizeInvoice(invoiceId);
+        console.log(`✓ Finalized invoice`);
+      } catch (finalizeError) {
+        console.warn(`Could not finalize invoice: ${finalizeError.message}`);
+      }
+    }
+
+    // Mark invoice as paid
+    console.log(`Attempting to mark invoice ${invoiceId} as paid...`);
+    try {
+      // Use the charge if we have it
+      if (chargeId) {
+        await stripe.invoices.pay(invoiceId, {
+          paid_out_of_band: true,
+          charge: chargeId,
+        });
+        console.log(`✓ Marked invoice as paid with charge ${chargeId}`);
+      } else {
+        // Mark as paid out of band
+        await stripe.invoices.pay(invoiceId, {
+          paid_out_of_band: true,
+        });
+        console.log(`✓ Marked invoice as paid (out of band)`);
+      }
+    } catch (payError) {
+      console.error(`Error marking invoice as paid: ${payError.message}`);
+      // Even if this fails, try to finalize the invoice one more time
+      try {
+        const currentInvoice = await stripe.invoices.retrieve(invoiceId);
+        if (currentInvoice.status === 'draft') {
+          await stripe.invoices.finalizeInvoice(invoiceId);
+          console.log(`Finalized draft invoice as last resort`);
+        }
+      } catch (e) {
+        console.warn(`Last resort finalize failed: ${e.message}`);
+      }
+    }
+
+    // Retrieve fresh subscription state
+    const finalSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+    console.log(`✓ Final subscription ${subscriptionId} status: ${finalSubscription.status}`);
+
+    // Log the invoice status as well
+    const finalInvoice = await stripe.invoices.retrieve(invoiceId);
+    console.log(`Final invoice ${invoiceId} status: ${finalInvoice.status}, paid: ${finalInvoice.paid}`);
+
+    res.json({
+      success: true,
+      subscriptionId: finalSubscription.id,
+      status: finalSubscription.status,
+      invoiceStatus: finalInvoice.status,
+      invoicePaid: finalInvoice.paid,
+    });
+  } catch (error) {
+    console.error('Error finalizing subscription:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to finalize subscription' 
+    });
+  }
+});
+
+/**
+ * Attach Payment Method to Subscription
+ * POST /api/attach-payment-method-to-subscription
+ * This attaches a payment method to an existing subscription and updates its status
+ * Useful for marking an "incomplete" subscription as "active" after payment succeeds
+ */
+app.post('/api/attach-payment-method-to-subscription', async (req, res) => {
+  try {
+    const { subscriptionId, paymentMethodId } = req.body;
+
+    if (!subscriptionId || !paymentMethodId) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: subscriptionId, paymentMethodId' 
+      });
+    }
+
+    // Retrieve the subscription
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const customerId = subscription.customer;
+
+    console.log(`Attaching payment method ${paymentMethodId} to subscription ${subscriptionId}`);
+
+    // Attach payment method to customer
+    try {
+      await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+      console.log(`✓ Attached payment method ${paymentMethodId} to customer ${customerId}`);
+    } catch (attachError) {
+      // Payment method might already be attached - continue
+      if (attachError.code !== 'payment_method_already_attached') {
+        throw attachError;
+      }
+      console.log(`ℹ Payment method already attached to customer`);
+    }
+
+    // Update subscription with the payment method
+    const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
+      default_payment_method: paymentMethodId,
+      payment_settings: {
+        save_default_payment_method: 'on_subscription',
+      },
+    });
+
+    console.log(`✓ Updated subscription with default payment method`);
+    console.log(`✓ Subscription status: ${updatedSubscription.status}`);
+
+    res.json({
+      success: true,
+      subscriptionId: updatedSubscription.id,
+      status: updatedSubscription.status,
+      message: `Payment method attached successfully. Subscription is now ${updatedSubscription.status}`,
+    });
+  } catch (error) {
+    console.error('Error attaching payment method to subscription:', error.message);
+    res.status(500).json({ 
+      error: error.message || 'Failed to attach payment method' 
+    });
+  }
+});
+
+/**
  * Cancel Stripe Subscription
  * POST /api/cancel-subscription
  */
@@ -272,18 +657,28 @@ app.post('/api/cancel-subscription', async (req, res) => {
   try {
     const { subscriptionId } = req.body;
 
+    console.log(`Cancel subscription request for: ${subscriptionId}`);
+
     // Validate required fields
     if (!subscriptionId) {
+      console.error('Missing subscriptionId in request body');
       return res.status(400).json({ 
         error: 'Missing required field: subscriptionId' 
       });
     }
 
+    // Verify subscription exists first
+    console.log(`Retrieving subscription ${subscriptionId} from Stripe...`);
+    const existingSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+    console.log(`Found subscription with status: ${existingSubscription.status}`);
+
     // Cancel the subscription
+    console.log(`Updating subscription to cancel_at_period_end...`);
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       cancel_at_period_end: true, // Let the subscription continue until the end of the billing period
     });
 
+    console.log(`✓ Subscription ${subscriptionId} cancelled successfully`);
     res.json({
       subscriptionId: subscription.id,
       status: subscription.status,
@@ -291,7 +686,8 @@ app.post('/api/cancel-subscription', async (req, res) => {
       currentPeriodEnd: subscription.current_period_end,
     });
   } catch (error) {
-    console.error('Error cancelling subscription:', error);
+    console.error('Error cancelling subscription:', error.message);
+    console.error('Error details:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to cancel subscription' 
     });
@@ -372,9 +768,8 @@ app.post('/api/check-pending-activation', async (req, res) => {
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    // Fetch user from Airtable
-    const { getUser, updateUserSubscription } = await import('./src/services/airtableService.js');
-    const user = await getUser(userId);
+    // Fetch user from Airtable using server-side helper
+    const user = await getServerUser(userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -402,23 +797,21 @@ app.post('/api/check-pending-activation', async (req, res) => {
     }
 
     // Activation date reached! Update user tier
-    console.log(`✓ Activating pending tier ${user.PendingTier} for user ${userId}`);
+    console.log(`✓ Activating pending tier: ${user.PendingTier} for user ${userId}`);
     
-    const subscriptionData = {
+    const updated = await updateServerUserSubscription(userId, {
       subscriptionTier: user.PendingTier,
-      lastPaymentDate: now.toISOString(),
-      subscriptionEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      autoRenewal: true,
-      pendingTier: null,
-      pendingActivationDate: null,
-    };
+      subscriptionStatus: 'active',
+      pendingTier: null, // Clear pending tier
+      pendingActivationDate: null, // Clear pending date
+      lastPaymentDate: new Date().toISOString().split('T')[0], // Today's date
+    });
 
-    await updateUserSubscription(userId, subscriptionData);
-    
-    res.json({ 
-      activated: true, 
-      message: `Successfully activated ${user.PendingTier} tier`,
-      newTier: user.PendingTier
+    res.json({
+      activated: true,
+      newTier: user.PendingTier,
+      message: `Tier upgraded to ${user.PendingTier}`,
+      user: updated
     });
   } catch (error) {
     console.error('Error checking pending activation:', error);

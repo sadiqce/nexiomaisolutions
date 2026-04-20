@@ -5,7 +5,7 @@ import { getStripe, createPaymentIntentForPlan, processPaymentSuccess, PAYMENT_P
 /**
  * Inner form component that uses Stripe hooks
  */
-const PaymentForm = ({ userId, userEmail, selectedPlan, onSuccess, onCancel, onError, currentTier }) => {
+const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSuccess, onCancel, onError, currentTier }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -42,14 +42,27 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, onSuccess, onCancel, onE
 
       // Payment succeeded - now update Airtable
       if (paymentIntent.status === 'succeeded') {
-        // Get subscription ID from payment intent metadata
-        // The subscription was created during createPaymentIntentForPlan()
-        // Pass the subscription ID and status to processPaymentSuccess
+        // Get subscription ID from state (stored during createPaymentIntent)
+        // Fallback to paymentIntent.subscription if not in state
+        const actualSubscriptionId = subscriptionId || paymentIntent.subscription;
+        
+        if (!actualSubscriptionId) {
+          setProcessError('Subscription ID not found. Please contact support.');
+          setIsProcessing(false);
+          return;
+        }
+        
+        // Extract payment method ID from the confirmed payment intent
+        const paymentMethodId = paymentIntent.payment_method;
+        
+        // Pass the subscription ID, payment intent ID, payment method ID, and status to processPaymentSuccess
         const result = await processPaymentSuccess(
           userId, 
           selectedPlan, 
-          paymentIntent.subscription, // subscription ID is in paymentIntent.subscription
-          paymentIntent.status
+          actualSubscriptionId,
+          paymentIntent.status,
+          paymentIntent.id,
+          paymentMethodId // NEW: Pass the payment method ID
         );
         onSuccess?.(result);
       } else if (paymentIntent.status === 'requires_action') {
@@ -149,6 +162,7 @@ const PaymentModalEmbedded = ({
 }) => {
   const [selectedPlan, setSelectedPlan] = useState(targetPlan);
   const [clientSecret, setClientSecret] = useState('');
+  const [subscriptionId, setSubscriptionId] = useState('');
   const [stripePromise, setStripePromise] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -176,32 +190,24 @@ const PaymentModalEmbedded = ({
     return !canPurchasePlan(planName) || loading || successMessage;
   };
 
-  // Reset state and sync with targetPlan when modal opens
+  // Reset state when modal opens - use targetPlan as-is
   useEffect(() => {
     if (isOpen) {
-      // Set selected plan based on what's available
-      if (hasPendingTier) {
-        setSelectedPlan(pendingTier);
-      } else if (isOnVolume) {
-        setSelectedPlan('Volume');
-      } else if (currentTier === 'Standard') {
-        setSelectedPlan('Volume');
-      } else {
-        setSelectedPlan(targetPlan);
-      }
+      setSelectedPlan(targetPlan);
       setSuccessMessage('');
       setError('');
       setClientSecret('');
+      setSubscriptionId('');
     }
-  }, [isOpen, currentTier, targetPlan, isOnVolume, hasPendingTier, pendingTier]);
+  }, [isOpen, targetPlan]);
 
   // Initialize Stripe and create payment intent when plan changes
   useEffect(() => {
-    if (isOpen && canProceed && !successMessage && !isOnVolume && !hasPendingTier) {
+    if (isOpen && canProceed && !successMessage && !isOnVolume && !hasPendingTier && selectedPlan) {
       createPaymentIntent();
       initializeStripe();
     }
-  }, [isOpen, selectedPlan, canProceed, successMessage, isOnVolume, hasPendingTier]);
+  }, [isOpen, selectedPlan]);
 
   const initializeStripe = async () => {
     try {
@@ -227,6 +233,7 @@ const PaymentModalEmbedded = ({
       );
 
       setClientSecret(paymentData.clientSecret);
+      setSubscriptionId(paymentData.subscriptionId || '');
     } catch (err) {
       setError(err.message || 'Failed to initialize payment');
       console.error('Payment intent error:', err);
@@ -393,6 +400,7 @@ const PaymentModalEmbedded = ({
               userId={userId}
               userEmail={userEmail}
               selectedPlan={selectedPlan}
+              subscriptionId={subscriptionId}
               onSuccess={handlePaymentSuccess}
               onCancel={() => onClose(false)}
               onError={handlePaymentError}

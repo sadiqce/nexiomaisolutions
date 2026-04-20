@@ -143,9 +143,12 @@ export const createStripeSubscription = async (planTier, userEmail, userId, stri
 export const cancelStripeSubscription = async (subscriptionId) => {
   return retryWithBackoff(async () => {
     if (!subscriptionId) {
+      console.error('cancelStripeSubscription: subscriptionId is required');
       throw new Error('Subscription ID is required');
     }
 
+    console.log(`Calling backend to cancel subscription ${subscriptionId}...`);
+    
     // Call backend to cancel subscription
     const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/cancel-subscription`, {
       method: 'POST',
@@ -159,12 +162,98 @@ export const cancelStripeSubscription = async (subscriptionId) => {
 
     if (!response.ok) {
       const error = await response.json();
+      console.error(`Backend error: ${error.error}`);
       throw new Error(error.error || 'Failed to cancel subscription');
     }
 
-    return await response.json();
+    const result = await response.json();
+    console.log(`✓ Backend cancelled subscription: ${result.status}`);
+    return result;
   }, 3, 1000); // 3 retries with 1s initial delay, exponentially backing off
 };
+
+/**
+ * Finalize subscription after payment succeeds
+ * This applies the successful payment to the subscription's invoice
+ * @param {string} subscriptionId - Stripe subscription ID
+ * @param {string} paymentIntentId - Payment intent ID
+ * @returns {Promise<object>} Finalization result
+ */
+export const finalizeSubscription = async (subscriptionId, paymentIntentId) => {
+  try {
+    if (!subscriptionId) {
+      throw new Error('Subscription ID is required');
+    }
+
+    console.log(`Finalizing subscription ${subscriptionId} with payment intent ${paymentIntentId}`);
+
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/finalize-subscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subscriptionId,
+        paymentIntentId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error(`Failed to finalize subscription: ${error.error}`);
+      throw new Error(error.error || 'Failed to finalize subscription');
+    }
+
+    const result = await response.json();
+    console.log(`✓ Subscription finalized:`, result);
+    return result;
+  } catch (error) {
+    console.error('Error finalizing subscription:', error);
+    throw error;
+  }
+};
+
+/**
+ * Attach payment method to subscription
+ * This changes subscription status from 'incomplete' to 'active' after payment succeeds
+ * @param {string} subscriptionId - Stripe subscription ID
+ * @param {string} paymentMethodId - Payment method ID from confirmed payment intent
+ * @returns {Promise<object>} Result with updated subscription status
+ */
+export const attachPaymentMethodToSubscription = async (subscriptionId, paymentMethodId) => {
+  try {
+    if (!subscriptionId || !paymentMethodId) {
+      throw new Error('Subscription ID and payment method ID are required');
+    }
+
+    console.log(`Attaching payment method ${paymentMethodId} to subscription ${subscriptionId}...`);
+
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/attach-payment-method-to-subscription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subscriptionId,
+        paymentMethodId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error(`Failed to attach payment method: ${error.error}`);
+      throw new Error(error.error || 'Failed to attach payment method');
+    }
+
+    const result = await response.json();
+    console.log(`✓ Payment method attached. Subscription status: ${result.status}`);
+    return result;
+  } catch (error) {
+    console.error('Error attaching payment method to subscription:', error);
+    throw error;
+  }
+};
+
 // Plan pricing configuration
 export const PAYMENT_PLANS = {
   Standard: {
@@ -343,13 +432,39 @@ const getBillingEndDate = (lastPaymentDate, explicitEndDate) => {
  * @param {string} subscriptionId - Stripe subscription ID
  * @param {string} subscriptionStatus - Stripe subscription status (should be 'active')
  */
-export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus) => {
+export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus, paymentIntentId = null, paymentMethodId = null) => {
   try {
     if (!userId || !planTier || !subscriptionId) {
       throw new Error('User ID, plan tier, and subscription ID are required');
     }
 
     console.log(`Processing payment success for user ${userId}, subscription ${subscriptionId}`);
+
+    // Attach payment method to subscription if provided
+    // This changes the subscription status from 'incomplete' to 'active'
+    if (paymentMethodId) {
+      try {
+        console.log(`Attaching payment method to subscription...`);
+        const attachResult = await attachPaymentMethodToSubscription(subscriptionId, paymentMethodId);
+        console.log(`✓ Payment method attached. Subscription status: ${attachResult.status}`);
+      } catch (attachError) {
+        console.error(`⚠ Failed to attach payment method: ${attachError.message}`);
+        // Continue anyway - payment succeeded, we'll still update Airtable
+      }
+    }
+
+    // Finalize the subscription to mark it as active
+    // This applies the successful payment to the subscription's invoice
+    if (paymentIntentId) {
+      try {
+        console.log(`Finalizing subscription in Stripe...`);
+        const finalizeResult = await finalizeSubscription(subscriptionId, paymentIntentId);
+        console.log(`Finalization result:`, finalizeResult);
+      } catch (finalizeError) {
+        console.error(`⚠ Failed to finalize subscription: ${finalizeError.message}`);
+        // Continue anyway - payment succeeded, we'll still update Airtable
+      }
+    }
 
     const user = await getUser(userId);
     const now = new Date();
@@ -516,25 +631,32 @@ export const cancelSubscription = async (userId) => {
   try {
     const { getUser, updateUserSubscription } = await import('./airtableService');
     
+    console.log(`Cancelling subscription for user ${userId}`);
+    
     // Get user from Airtable
     const user = await getUser(userId);
     
     if (!user) {
+      console.error(`User ${userId} not found in Airtable`);
       throw new Error('User not found');
     }
 
+    console.log(`User tier: ${user.Tier}, subscription status: ${user.SubscriptionStatus}, stripe ID: ${user.StripeSubscriptionId}`);
+
     if (!user.SubscriptionStatus || user.SubscriptionStatus !== 'active') {
+      console.error(`User ${userId} does not have active subscription. Current status: ${user.SubscriptionStatus}`);
       throw new Error('User does not have an active subscription');
     }
 
     if (!user.StripeSubscriptionId) {
+      console.error(`User ${userId} has no StripeSubscriptionId stored`);
       throw new Error('No Stripe subscription found for this user');
     }
 
     // Cancel Stripe subscription FIRST with retry logic
     console.log(`Cancelling Stripe subscription ${user.StripeSubscriptionId} for user ${userId}`);
     const cancelResult = await cancelStripeSubscription(user.StripeSubscriptionId);
-    console.log(`✓ Successfully cancelled Stripe subscription ${user.StripeSubscriptionId}`);
+    console.log(`✓ Successfully cancelled Stripe subscription ${user.StripeSubscriptionId}: ${cancelResult.status}`);
 
     // Only update Airtable AFTER Stripe cancellation succeeds
     const billingEndDate = getBillingEndDate(user.LastPaymentDate, user.SubscriptionEndDate);
@@ -548,6 +670,7 @@ export const cancelSubscription = async (userId) => {
       subscriptionData.subscriptionEndDate = billingEndDate.toISOString();
     }
 
+    console.log(`Updating Airtable for user ${userId} with subscription data:`, subscriptionData);
     await updateUserSubscription(userId, subscriptionData);
     console.log(`✓ Updated Airtable with cancellation status for user ${userId}`);
 
@@ -556,7 +679,7 @@ export const cancelSubscription = async (userId) => {
       message: 'Your subscription has been cancelled. Your plan remains active until the end of your billing period.' 
     };
   } catch (error) {
-    console.error('Error cancelling subscription:', error);
+    console.error('Error cancelling subscription:', error.message);
     console.error(`⚠ Airtable was NOT updated for user ${userId} due to error`);
     throw error;
   }

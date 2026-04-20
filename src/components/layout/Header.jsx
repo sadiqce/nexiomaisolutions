@@ -11,6 +11,7 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
     const [daysUntilPlanChange, setDaysUntilPlanChange] = useState(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [isCanceling, setIsCanceling] = useState(false);
+    const [cancelError, setCancelError] = useState(null);
 
     // Fetch user tier and subscription status on mount and when currentUser changes
     useEffect(() => {
@@ -56,23 +57,68 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
     }, [pendingPlan]);
 
     const getPlanDetails = () => {
-        if (!userTier) return null;
         const planInfo = {
-            'Standard': { limit: '100 documents/mo', retention: '7 days', maxPages: '10 pages' },
-            'Volume': { limit: '500 documents/mo', retention: '14 days', maxPages: '25 pages' },
-            'Sandbox': { limit: '5 documents/mo', retention: '24 hours', maxPages: '2 pages' },
+            'Sandbox': {
+                limit: '5 documents/mo',
+                retention: '24 hours',
+                maxPages: '2 pages',
+                maxFileSize: '2 MB',
+                features: [
+                    'Standard AI extraction',
+                    'View-only Compliance Ledger',
+                    'Top-Up packs available'
+                ]
+            },
+            'Free': {
+                limit: '5 documents/mo',
+                retention: '24 hours',
+                maxPages: '2 pages',
+                maxFileSize: '2 MB',
+                features: [
+                    'Standard AI extraction',
+                    'View-only Compliance Ledger',
+                    'Top-Up packs available'
+                ]
+            },
+            'Standard': {
+                limit: '100 documents/mo',
+                retention: '7 days',
+                maxPages: '10 pages',
+                maxFileSize: '10 MB',
+                features: [
+                    'Standard AI extraction',
+                    'Top-Up packs available',
+                    'Auto-renewal with cancel anytime'
+                ]
+            },
+            'Volume': {
+                limit: '500 documents/mo',
+                retention: '14 days',
+                maxPages: '25 pages',
+                maxFileSize: '25 MB',
+                features: [
+                    'Standard AI extraction',
+                    'Top-Up packs available',
+                    'Auto-renewal with cancel anytime'
+                ]
+            }
         };
-        return planInfo[userTier];
+        return planInfo[userTier] || planInfo['Sandbox'];
     };
 
     const handleCancelClick = async () => {
         if (!onCancelSubscription || !currentUser) return;
         setIsCanceling(true);
+        setCancelError(null);
         try {
+            console.log(`Initiating subscription cancellation for user ${currentUser.uid}...`);
             await onCancelSubscription(currentUser.uid);
+            console.log(`✓ Subscription cancelled successfully`);
             setShowCancelConfirm(false);
         } catch (err) {
+            const errorMessage = err?.message || 'Failed to cancel subscription';
             console.error('Error canceling subscription:', err);
+            setCancelError(errorMessage);
         } finally {
             setIsCanceling(false);
         }
@@ -115,14 +161,39 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                                 </div>
                                 
                                 {/* Dropdown Menu */}
-                                <div className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                                <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                                     <div className="p-4 border-b border-gray-700">
-                                        <h3 className="text-white font-semibold mb-2">{userTier} Plan</h3>
-                                        <div className="space-y-1 text-xs text-gray-300">
-                                            <p>✓ {getPlanDetails()?.limit}</p>
-                                            <p>✓ Max {getPlanDetails()?.maxPages}</p>
-                                            <p>✓ {getPlanDetails()?.retention} retention</p>
-                                        </div>
+                                        <h3 className="text-white font-semibold mb-3">{userTier || 'Sandbox'} Plan</h3>
+                                        {getPlanDetails() && (
+                                            <div className="space-y-2 text-xs text-gray-300">
+                                                <div className="flex items-start">
+                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span>{getPlanDetails().limit}</span>
+                                                </div>
+                                                <div className="flex items-start">
+                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span>Max file size: {getPlanDetails().maxFileSize}</span>
+                                                </div>
+                                                <div className="flex items-start">
+                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span>Max {getPlanDetails().maxPages} per document</span>
+                                                </div>
+                                                <div className="flex items-start">
+                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span>{getPlanDetails().retention} file retention</span>
+                                                </div>
+                                                {getPlanDetails().features && getPlanDetails().features.length > 0 && (
+                                                    <div className="pt-2 border-t border-gray-700">
+                                                        {getPlanDetails().features.map((feature, idx) => (
+                                                            <div key={idx} className="flex items-start mt-2">
+                                                                <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                                <span>{feature}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                     {userTier !== 'Volume' && (
                                         <div className="p-3 border-t border-gray-700">
@@ -159,9 +230,17 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                                             <p className="text-gray-300 text-sm mb-4">
                                                 Are you sure you want to cancel your {userTier} subscription? You'll be downgraded to the Sandbox plan.
                                             </p>
+                                            {cancelError && (
+                                                <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
+                                                    {cancelError}
+                                                </div>
+                                            )}
                                             <div className="flex gap-3">
                                                 <button
-                                                    onClick={() => setShowCancelConfirm(false)}
+                                                    onClick={() => {
+                                                        setShowCancelConfirm(false);
+                                                        setCancelError(null);
+                                                    }}
                                                     disabled={isCanceling}
                                                     className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition disabled:opacity-50"
                                                 >
