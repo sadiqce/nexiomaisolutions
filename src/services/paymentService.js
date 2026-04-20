@@ -23,6 +23,47 @@ export const getStripe = async () => {
   }
   return stripePromise;
 };
+
+/**
+ * Check and activate pending tier if activation date is reached
+ * This is called server-side via backend endpoint to ensure activation
+ * happens even if user doesn't log in to the portal
+ * @param {string} userId - User ID
+ * @returns {Promise<object>} Status of pending activation check
+ */
+export const checkAndActivatePendingTier = async (userId) => {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/check-pending-activation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.warn(`⚠ Check pending activation failed: ${error.error}`);
+      return { activated: false, error: error.error };
+    }
+
+    const result = await response.json();
+    
+    if (result.activated) {
+      console.log(`✓ Pending tier activated: ${result.newTier}`);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error checking pending activation:', error);
+    return { activated: false, error: error.message };
+  }
+};
+
 /**
  * Retry helper function with exponential backoff
  * @param {Function} fn - Async function to retry
@@ -60,9 +101,10 @@ const retryWithBackoff = async (fn, maxRetries = 3, delayMs = 1000) => {
  * @param {string} userEmail - User email
  * @param {string} userId - User ID (client ID)
  * @param {string} stripePriceId - Stripe price ID for the plan
+ * @param {string} paymentMethodId - Payment method ID (optional, from confirmed payment intent)
  * @returns {Promise<object>} Subscription details with client secret if needed
  */
-export const createStripeSubscription = async (planTier, userEmail, userId, stripePriceId) => {
+export const createStripeSubscription = async (planTier, userEmail, userId, stripePriceId, paymentMethodId = null) => {
   return retryWithBackoff(async () => {
     if (!userId || !userEmail || !stripePriceId) {
       throw new Error('User ID, email, and Stripe price ID are required');
@@ -80,6 +122,7 @@ export const createStripeSubscription = async (planTier, userEmail, userId, stri
         planTier,
         priceId: stripePriceId,
         clientId: userId, // Pass client ID for metadata
+        paymentMethodId, // Pass payment method from confirmed payment intent
       }),
     });
 
@@ -167,11 +210,14 @@ export const TOPUP_PACKS = {
 };
 
 /**
- * Create Payment Intent for plan upgrade
+ * Prepare for plan upgrade payment
+ * This creates the subscription first and returns its payment intent's client secret
+ * The frontend uses this client_secret with stripe.confirmPayment()
+ * 
  * @param {string} planTier - Plan tier (Standard, Volume)
  * @param {string} userEmail - User email
  * @param {string} userId - User ID
- * @returns {Promise<object>} Payment intent with client secret
+ * @returns {Promise<object>} Subscription details with client secret for payment
  */
 export const createPaymentIntentForPlan = async (planTier, userEmail, userId) => {
   try {
@@ -181,35 +227,41 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
 
     const plan = PAYMENT_PLANS[planTier];
     if (!plan) throw new Error('Invalid plan tier');
+    
+    if (!plan.stripePriceId) {
+      throw new Error(`Stripe price ID not configured for ${planTier} plan. Set VITE_STRIPE_PRICE_${planTier.toUpperCase()} in .env`);
+    }
 
-    // Call backend to create payment intent
-    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-payment-intent`, {
+    console.log(`Creating subscription for ${planTier} plan (userId: ${userId})`);
+
+    // Call backend to create subscription
+    // Backend will return the subscription with its payment_intent's client_secret
+    const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-subscription`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: plan.amount,
-        currency: plan.currency,
-        description: `${planTier} Plan - Monthly Subscription`,
         userId,
         userEmail,
-        metadata: {
-          type: 'plan',
-          planTier,
-          interval: plan.interval,
-        },
+        planTier,
+        priceId: plan.stripePriceId,
+        clientId: userId,
       }),
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to create payment intent');
+      throw new Error(error.error || 'Failed to prepare payment');
     }
 
-    return await response.json();
+    const result = await response.json();
+    console.log(`✓ Subscription created: ${result.subscriptionId}`);
+    console.log(`✓ Client secret ready for payment confirmation`);
+    
+    return result; // Contains: clientSecret, subscriptionId, status, etc.
   } catch (error) {
-    console.error('Error creating payment intent:', error);
+    console.error('Error preparing payment:', error);
     throw error;
   }
 };
@@ -263,14 +315,13 @@ export const createPaymentIntentForTopup = async (topupId, userEmail, userId) =>
 };
 
 /**
- * Process a successful plan payment
- * Updates user tier in Airtable
- * @param {string} userId - User ID
- * @param {string} planTier - Plan tier (Standard, Volume)
- * @param {string} stripePaymentIntentId - Stripe Payment Intent ID
+ * Helper function to add days to a date
  */
 const addDays = (date, days) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 
+/**
+ * Calculate billing end date
+ */
 const getBillingEndDate = (lastPaymentDate, explicitEndDate) => {
   if (explicitEndDate) {
     return new Date(explicitEndDate);
@@ -282,89 +333,99 @@ const getBillingEndDate = (lastPaymentDate, explicitEndDate) => {
   return addDays(date, 30);
 };
 
-export const processPaymentSuccess = async (userId, planTier, stripePaymentIntentId = null, userEmail = null) => {
+/**
+ * Process successful payment for plan upgrade
+ * At this point, the subscription is already created by createPaymentIntentForPlan()
+ * This function just needs to update Airtable with the subscription details
+ * 
+ * @param {string} userId - User ID
+ * @param {string} planTier - Plan tier (Standard, Volume)
+ * @param {string} subscriptionId - Stripe subscription ID
+ * @param {string} subscriptionStatus - Stripe subscription status (should be 'active')
+ */
+export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus) => {
   try {
-    const plan = PAYMENT_PLANS[planTier];
-    if (!plan) throw new Error('Invalid plan tier');
-
-    const user = await getUser(userId);
-    const email = userEmail || user?.Email;
-    
-    if (!email) {
-      throw new Error('User email is required to create subscription');
+    if (!userId || !planTier || !subscriptionId) {
+      throw new Error('User ID, plan tier, and subscription ID are required');
     }
 
-    const now = new Date();
-    const billingEndDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
-    const isCancelledButStillActive = user?.SubscriptionStatus === 'inactive' && billingEndDate && billingEndDate > now;
+    console.log(`Processing payment success for user ${userId}, subscription ${subscriptionId}`);
 
-    // For deferred activation (cancelled but still active), no Stripe subscription needed yet
-    if (isCancelledButStillActive) {
+    const user = await getUser(userId);
+    const now = new Date();
+    const currentTier = user?.Tier || 'Sandbox';
+    const isUpgradingFromFree = currentTier === 'Sandbox' || currentTier === 'Free';
+    const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
+
+    // Case 1: Free user upgrading to paid plan → Activate IMMEDIATELY
+    if (isUpgradingFromFree) {
+      console.log(`✓ Free user upgrading to ${planTier}. Activating immediately.`);
+      
       const subscriptionData = {
         autoRenewal: true,
-        pendingTier: planTier,
-        pendingActivationDate: billingEndDate.toISOString(),
+        subscriptionTier: planTier,
+        subscriptionStatus: 'active',
+        lastPaymentDate: now.toISOString(),
+        subscriptionEndDate: addDays(now, 30).toISOString(),
+        pendingTier: null,
+        pendingActivationDate: null,
+        stripeSubscriptionId: subscriptionId,
+        stripeSubscriptionStatus: subscriptionStatus || 'active',
       };
 
-      if (stripePaymentIntentId) {
-        subscriptionData.stripePaymentIntentId = stripePaymentIntentId;
+      await updateUserSubscription(userId, subscriptionData);
+      console.log(`✓ Updated Airtable for active ${planTier} subscription`);
+
+      return {
+        success: true,
+        message: `Successfully activated ${planTier} plan!`,
+      };
+    }
+
+    // Case 2: Paid user upgrading to another paid plan → DEFER
+    if (isUpgradingFromPaid) {
+      const billingEndDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
+      
+      console.log(`✓ Paid user upgrading from ${currentTier} to ${planTier}. Deferring to ${billingEndDate.toISOString()}`);
+      
+      // Cancel the old Stripe subscription if it exists
+      if (user?.StripeSubscriptionId) {
+        try {
+          console.log(`Cancelling old Stripe subscription ${user.StripeSubscriptionId}`);
+          await cancelStripeSubscription(user.StripeSubscriptionId);
+          console.log(`✓ Cancelled old Stripe subscription`);
+        } catch (cancelError) {
+          console.error(`⚠ Failed to cancel old subscription: ${cancelError.message}`);
+          // Continue anyway - we'll still schedule the new plan
+        }
       }
 
+      // Prepare subscription data for the PENDING (future) tier
+      const subscriptionData = {
+        autoRenewal: true,
+        subscriptionStatus: 'active', // Current status stays active
+        pendingTier: planTier,
+        pendingActivationDate: billingEndDate.toISOString(),
+        stripeSubscriptionId: subscriptionId,
+        stripeSubscriptionStatus: subscriptionStatus || 'active',
+      };
+
       await updateUserSubscription(userId, subscriptionData);
+      console.log(`✓ Updated Airtable with pending tier`);
 
       const daysLeft = Math.max(0, Math.ceil((billingEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
       const daysText = daysLeft === 1 ? '1 day' : `${daysLeft} days`;
 
       return {
         success: true,
-        message: `Your ${planTier} plan is scheduled to start in ${daysText}, on ${billingEndDate.toLocaleDateString()}.`,
+        message: `Your ${planTier} plan is scheduled to activate in ${daysText}, on ${billingEndDate.toLocaleDateString()}. Your current plan remains active until then.`,
       };
     }
 
-    // For immediate activation, MUST create Stripe subscription first
-    const subscriptionData = {
-      autoRenewal: true,
-      subscriptionTier: planTier,
-      subscriptionStatus: 'active',
-      lastPaymentDate: now.toISOString(),
-      subscriptionEndDate: addDays(now, 30).toISOString(),
-      pendingTier: null,
-      pendingActivationDate: null,
-    };
+    throw new Error(`Unable to determine upgrade type for tier ${currentTier} to ${planTier}`);
 
-    if (stripePaymentIntentId) {
-      subscriptionData.stripePaymentIntentId = stripePaymentIntentId;
-    }
-
-    // Create Stripe subscription BEFORE updating Airtable
-    if (plan.stripePriceId) {
-      console.log(`Creating Stripe subscription for user ${userId}, plan: ${planTier}`);
-      const stripeSubscription = await createStripeSubscription(
-        planTier, 
-        email, 
-        userId, 
-        plan.stripePriceId
-      );
-      
-      subscriptionData.stripeSubscriptionId = stripeSubscription.subscriptionId;
-      subscriptionData.stripeSubscriptionStatus = stripeSubscription.status;
-      
-      console.log(`✓ Successfully created Stripe subscription ${stripeSubscription.subscriptionId} for user ${userId}`);
-    } else {
-      throw new Error(`Stripe price ID not configured for ${planTier} plan. Check VITE_STRIPE_PRICE_${planTier.toUpperCase()} environment variable.`);
-    }
-
-    // Only update Airtable AFTER Stripe subscription succeeds
-    await updateUserSubscription(userId, subscriptionData);
-    console.log(`✓ Updated Airtable with subscription data for user ${userId}`);
-
-    return {
-      success: true,
-      message: `Successfully upgraded to ${planTier} plan!`,
-    };
   } catch (error) {
     console.error('Error processing payment success:', error);
-    console.error(`⚠ Airtable was NOT updated for user ${userId} due to error`);
     throw error;
   }
 };
@@ -380,16 +441,18 @@ export const activateScheduledPlan = async (userId, user) => {
     return null;
   }
 
+  // Move pending tier to active tier
   const subscriptionData = {
     subscriptionTier: user.PendingTier,
-    subscriptionStatus: 'active',
     lastPaymentDate: now.toISOString(),
     subscriptionEndDate: addDays(now, 30).toISOString(),
     autoRenewal: true,
     pendingTier: null,
     pendingActivationDate: null,
+    // Note: stripeSubscriptionId should already be set from when the pending tier was purchased
   };
 
+  console.log(`✓ Activating scheduled plan for user ${userId}: ${user.PendingTier}`);
   return await updateUserSubscription(userId, subscriptionData);
 };
 

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { uploadFileToS3 } from '../services/s3Service';
 import { fetchUserFiles, createFileRecord, getUser, getTopUpCredits } from '../services/airtableService';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
-import { cancelSubscription, activateScheduledPlan } from '../services/paymentService';
+import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';
 import { validateUpload, checkMonthlyLimit, getTierConfig } from '../services/tierLimitService';
 import { validateDocumentPageCount } from '../utils/docxUtils';
 import FileList from '../components/dashboard/FileList';
@@ -13,7 +13,7 @@ import TopupModalEmbedded from '../components/payment/TopupModalEmbedded';
 
 const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
 
-const PortalDashboard = () => {
+const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, onPaymentSuccess }) => {
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
     const [refreshTrigger, setRefreshTrigger] = useState(0); // To force re-fetch
@@ -44,6 +44,9 @@ const PortalDashboard = () => {
         if (currentUser && isEmailVerified) {
             const fetchFiles = async () => {
                 try {
+                    // Check and activate pending tier via backend
+                    await checkAndActivatePendingTier(currentUser.uid);
+                    
                     const user = await getUser(currentUser.uid);
                     if (user) {
                         setUserTier(user.Tier);
@@ -88,6 +91,39 @@ const PortalDashboard = () => {
             };
         }
     }, [currentUser, isEmailVerified, refreshTrigger]);
+
+    // 2. Periodically check for pending tier activation (every 60 seconds)
+    useEffect(() => {
+        if (currentUser) {
+            const checkPendingInterval = setInterval(async () => {
+                try {
+                    await checkAndActivatePendingTier(currentUser.uid);
+                } catch (error) {
+                    console.error('Error checking pending tier:', error);
+                }
+            }, 60000); // Check every 60 seconds
+
+            return () => clearInterval(checkPendingInterval);
+        }
+    }, [currentUser]);
+
+    // Handle upgrade modal trigger from Header
+    useEffect(() => {
+        if (shouldShowUpgradeModal) {
+            // Determine target plan based on current tier
+            const currentTier = userTier || 'Sandbox';
+            let targetPlan = 'Standard';
+            if (currentTier === 'Standard') {
+                targetPlan = 'Volume';
+            }
+            setPaymentModalConfig({
+                type: 'plan',
+                targetPlan: targetPlan,
+            });
+            setShowPaymentModal(true);
+            setShouldShowUpgradeModal(false);
+        }
+    }, [shouldShowUpgradeModal, setShouldShowUpgradeModal, userTier]);
 
     const handleResendVerification = async () => {
         try {
@@ -135,7 +171,7 @@ const PortalDashboard = () => {
     const handlePaymentModalClose = (success = false) => {
         setShowPaymentModal(false);
         if (success) {
-            // Refresh user data after successful payment
+            // Refresh user data immediately after successful payment
             const fetchUserData = async () => {
                 try {
                     const user = await getUser(currentUser.uid);
@@ -145,14 +181,28 @@ const PortalDashboard = () => {
                         setSubscriptionEndDate(user.SubscriptionEndDate || null);
                         setPendingTier(user.PendingTier || null);
                         setPendingActivationDate(user.PendingActivationDate || null);
-                        setInfo(`✓ Successfully upgraded to ${user.Tier} plan!`);
-                        setTimeout(() => setInfo(''), 3000);
+                        
+                        // Show appropriate success message
+                        if (user.PendingTier) {
+                            const activationDate = new Date(user.PendingActivationDate);
+                            const now = new Date();
+                            const daysLeft = Math.ceil((activationDate - now) / (1000 * 60 * 60 * 24));
+                            setInfo(`✓ ${user.PendingTier} plan scheduled! Activates in ${daysLeft} days.`);
+                        } else {
+                            setInfo(`✓ Successfully upgraded to ${user.Tier} plan!`);
+                        }
+                        setTimeout(() => setInfo(''), 5000);
+                        
+                        // Notify parent component (App.jsx) to trigger header refresh
+                        onPaymentSuccess?.();
                     }
                 } catch (error) {
                     console.error('Failed to fetch user data:', error);
                 }
             };
             fetchUserData();
+            // Also trigger a refresh of the file list
+            setRefreshTrigger(prev => prev + 1);
         }
     };
 

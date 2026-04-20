@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 const TITLE_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 bg-clip-text text-transparent";
 const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
 
-const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCancelSubscription }) => {
+const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCancelSubscription, onUpgradeClick, paymentRefreshTrigger }) => {
     const isDashboard = currentPage === 'PortalDashboard';
     const [userTier, setUserTier] = useState(null);
     const [subscriptionStatus, setSubscriptionStatus] = useState(null);
@@ -17,7 +17,7 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
         if (isDashboard && currentUser && getUserTier) {
             fetchUserData();
         }
-    }, [isDashboard, currentUser, getUserTier]);
+    }, [isDashboard, currentUser, getUserTier, paymentRefreshTrigger]);
 
     const fetchUserData = async () => {
         try {
@@ -25,6 +25,16 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
             const user = await getUser(currentUser.uid);
             setUserTier(user?.Tier || 'Sandbox');
             setSubscriptionStatus(user?.SubscriptionStatus || 'inactive');
+            
+            // Set pending plan info if exists
+            if (user?.PendingTier && user?.PendingActivationDate) {
+                setPendingPlan({
+                    plan: user.PendingTier,
+                    startDate: user.PendingActivationDate
+                });
+            } else {
+                setPendingPlan(null);
+            }
         } catch (err) {
             console.error('Error fetching user data:', err);
         }
@@ -116,7 +126,10 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                                     </div>
                                     {userTier !== 'Volume' && (
                                         <div className="p-3 border-t border-gray-700">
-                                            <button className="w-full px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded transition">
+                                            <button 
+                                                onClick={() => onUpgradeClick && onUpgradeClick()}
+                                                className="w-full px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded transition"
+                                            >
                                                 Upgrade Plan
                                             </button>
                                         </div>

@@ -228,12 +228,6 @@ const TermsOfUseView = () => {
                     <td className="text-center py-3 px-4 text-green-400">7 days</td>
                     <td className="text-center py-3 px-4 text-purple-400">14 days</td>
                   </tr>
-                  <tr>
-                    <td className="py-3 px-4 text-gray-300">Priority Processing</td>
-                    <td className="text-center py-3 px-4 text-gray-500">No</td>
-                    <td className="text-center py-3 px-4 text-gray-500">No</td>
-                    <td className="text-center py-3 px-4 text-green-400 font-bold">Yes</td>
-                  </tr>
                 </tbody>
               </table>
             </div>

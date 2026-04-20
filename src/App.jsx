@@ -14,6 +14,8 @@ import TermsOfUseView from './views/TermsOfUseView';
 const AppContent = () => {
     const [currentPage, setCurrentPage] = useState('Home');
     const [uploadedFiles, setUploadedFiles] = useState([]);
+    const [shouldShowUpgradeModal, setShouldShowUpgradeModal] = useState(false);
+    const [paymentRefreshTrigger, setPaymentRefreshTrigger] = useState(0); // Trigger for Header to refetch user data
     const { currentUser, logout } = useAuth();
 
     // Handle URL-based routing for direct portal access
@@ -84,6 +86,10 @@ const AppContent = () => {
         }
     }, [currentPage]);
 
+    const handleUpgradeClick = useCallback(() => {
+        setShouldShowUpgradeModal(true);
+    }, []);
+
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }, [currentPage]);
@@ -117,7 +123,7 @@ const AppContent = () => {
             break;
         case 'PortalDashboard':
             content = currentUser
-                ? <PortalDashboard uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} signOut={handleSignOut} />
+                ? <PortalDashboard uploadedFiles={uploadedFiles} setUploadedFiles={setUploadedFiles} signOut={handleSignOut} shouldShowUpgradeModal={shouldShowUpgradeModal} setShouldShowUpgradeModal={setShouldShowUpgradeModal} onPaymentSuccess={() => setPaymentRefreshTrigger(t => t + 1)} />
                 : <PortalLogin navigate={navigate} onLogin={() => navigate('PortalDashboard')} />;
             break;
         case 'Home':
@@ -128,7 +134,7 @@ const AppContent = () => {
 
     return (
         <div className="min-h-screen bg-[#0d0a1b] text-gray-200 font-sans">
-            <Header navigate={navigate} currentPage={currentPage} signOut={handleSignOut} currentUser={currentUser} getUserTier={getUserTier} onCancelSubscription={handleCancelSubscription} />
+            <Header navigate={navigate} currentPage={currentPage} signOut={handleSignOut} currentUser={currentUser} getUserTier={getUserTier} onCancelSubscription={handleCancelSubscription} onUpgradeClick={handleUpgradeClick} paymentRefreshTrigger={paymentRefreshTrigger} />
             <main>{content}</main>
             <footer className="bg-gray-900 mt-20 p-8 text-center border-t border-purple-800">
                 <p className="text-gray-500 text-sm">&copy; {new Date().getFullYear()} Nexiom AI Solutions.</p>

@@ -172,8 +172,13 @@ app.post('/api/create-payment-link', async (req, res) => {
 });
 
 /**
- * Create Stripe Subscription for plan
+ * Create Subscription and get Payment Intent for first payment
  * POST /api/create-subscription
+ * 
+ * IMPORTANT: This creates the subscription with payment_behavior: 'default_incomplete'
+ * The subscription's FIRST INVOICE already has a payment_intent attached.
+ * Frontend uses this payment_intent's client_secret to collect payment.
+ * When payment succeeds, subscription automatically becomes 'active'.
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
@@ -187,7 +192,6 @@ app.post('/api/create-subscription', async (req, res) => {
     }
 
     // First, get or create a customer in Stripe
-    // Look for existing customer with this email
     const customers = await stripe.customers.list({
       email: userEmail,
       limit: 1,
@@ -196,6 +200,7 @@ app.post('/api/create-subscription', async (req, res) => {
     let customerId;
     if (customers.data.length > 0) {
       customerId = customers.data[0].id;
+      console.log(`✓ Using existing Stripe customer: ${customerId}`);
     } else {
       // Create new customer
       const customer = await stripe.customers.create({
@@ -206,9 +211,12 @@ app.post('/api/create-subscription', async (req, res) => {
         },
       });
       customerId = customer.id;
+      console.log(`✓ Created new Stripe customer: ${customerId}`);
     }
 
-    // Create subscription
+    // Create subscription with 'default_incomplete'
+    // This means: "Create subscription, but don't charge yet. Wait for payment intent to be confirmed."
+    // The subscription's first invoice will have a payment_intent attached that we'll use on the frontend
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
       items: [
@@ -219,18 +227,32 @@ app.post('/api/create-subscription', async (req, res) => {
       metadata: {
         userId,
         planTier,
-        clientId: clientId || '', // Optional client ID
+        clientId: clientId || '',
       },
-      payment_behavior: 'default_incomplete',
+      payment_behavior: 'default_incomplete', // Don't charge yet - wait for payment_intent to be confirmed
       payment_settings: {
         save_default_payment_method: 'on_subscription',
       },
       expand: ['latest_invoice.payment_intent'],
     });
 
+    // Get the payment intent from the subscription's invoice
+    // This is the payment intent that needs to be confirmed on the frontend
+    const paymentIntent = subscription.latest_invoice?.payment_intent;
+    
+    if (!paymentIntent || !paymentIntent.client_secret) {
+      throw new Error('Failed to get payment intent from subscription');
+    }
+
+    console.log(`✓ Created subscription ${subscription.id}`);
+    console.log(`✓ Subscription status: ${subscription.status}`);
+    console.log(`✓ Payment intent status: ${paymentIntent.status}`);
+    console.log(`✓ Returning client_secret for frontend payment confirmation`);
+
     res.json({
       subscriptionId: subscription.id,
-      clientSecret: subscription.latest_invoice?.payment_intent?.client_secret || null,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
       status: subscription.status,
       customerId,
     });
@@ -334,6 +356,76 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
 
   // Return a 200 response to acknowledge receipt
   res.json({ received: true });
+});
+
+/**
+ * Check and Activate Pending Tier if Date is Reached
+ * POST /api/check-pending-activation
+ * This endpoint checks if a user has a pending tier scheduled for activation
+ * and activates it if the activation date has been reached.
+ */
+app.post('/api/check-pending-activation', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Fetch user from Airtable
+    const { getUser, updateUserSubscription } = await import('./src/services/airtableService.js');
+    const user = await getUser(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user has a pending tier
+    if (!user.PendingTier || !user.PendingActivationDate) {
+      return res.json({ 
+        activated: false, 
+        message: 'No pending tier scheduled' 
+      });
+    }
+
+    // Check if activation date has been reached
+    const now = new Date();
+    const activationDate = new Date(user.PendingActivationDate);
+    
+    if (activationDate > now) {
+      const daysLeft = Math.ceil((activationDate - now) / (1000 * 60 * 60 * 24));
+      return res.json({ 
+        activated: false, 
+        message: `Pending tier activation scheduled in ${daysLeft} days`,
+        daysRemaining: daysLeft
+      });
+    }
+
+    // Activation date reached! Update user tier
+    console.log(`✓ Activating pending tier ${user.PendingTier} for user ${userId}`);
+    
+    const subscriptionData = {
+      subscriptionTier: user.PendingTier,
+      lastPaymentDate: now.toISOString(),
+      subscriptionEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      autoRenewal: true,
+      pendingTier: null,
+      pendingActivationDate: null,
+    };
+
+    await updateUserSubscription(userId, subscriptionData);
+    
+    res.json({ 
+      activated: true, 
+      message: `Successfully activated ${user.PendingTier} tier`,
+      newTier: user.PendingTier
+    });
+  } catch (error) {
+    console.error('Error checking pending activation:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to check pending activation' 
+    });
+  }
 });
 
 // Error handling middleware

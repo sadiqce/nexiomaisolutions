@@ -12,12 +12,16 @@ const PricingView = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState('Standard');
   const [currentTier, setCurrentTier] = useState(null);
+  const [pendingTier, setPendingTier] = useState(null);
+  const [pendingActivationDate, setPendingActivationDate] = useState(null);
 
   const fetchUserTier = useCallback(async () => {
     try {
       const user = await getUser(currentUser.uid);
       if (user && user.Tier) {
         setCurrentTier(user.Tier);
+        setPendingTier(user.PendingTier || null);
+        setPendingActivationDate(user.PendingActivationDate || null);
       }
     } catch (err) {
       console.error('Error fetching user tier:', err);
@@ -46,7 +50,6 @@ const PricingView = () => {
         { text: '24-hour file retention', included: true },
         { text: 'Standard AI extraction (Material, Lot Number)', included: true },
         { text: 'View-only access to Compliance Ledger', included: true },
-        { text: 'Priority queueing', included: false },
         { text: 'Top-Up packs available', included: false },
       ],
       cta: 'Get Started Free',
@@ -66,7 +69,6 @@ const PricingView = () => {
         { text: 'Max document length: 10 pages', included: true },
         { text: '7-day file retention', included: true },
         { text: 'Standard AI extraction', included: true },
-        { text: 'Priority queueing', included: false },
         { text: 'Top-Up packs available ($20/50 docs)', included: true },
         { text: 'Auto-renewal with cancel anytime', included: true },
       ],
@@ -87,7 +89,6 @@ const PricingView = () => {
         { text: 'Max document length: 25 pages', included: true },
         { text: '14-day file retention', included: true },
         { text: 'Standard AI extraction', included: true },
-        { text: 'Priority queue processing', included: true },
         { text: 'Top-Up packs available ($20/50 docs)', included: true },
         { text: 'Auto-renewal with cancel anytime', included: true },
       ],
@@ -110,6 +111,20 @@ const PricingView = () => {
       return;
     }
 
+    // Check if user has a pending tier
+    if (pendingTier) {
+      setError(`⏳ You already have ${pendingTier} plan scheduled for activation. You cannot upgrade while a tier change is pending.`);
+      setTimeout(() => setError(''), 5000);
+      return;
+    }
+
+    // Check if user is already on Volume (highest tier)
+    if (currentTier === 'Volume') {
+      setError('✓ You are already on the highest tier (Volume)');
+      setTimeout(() => setError(''), 5000);
+      return;
+    }
+
     // Open payment modal for paid plans
     setSelectedPlan(planType === 'standard' ? 'Standard' : 'Volume');
     setShowPaymentModal(true);
@@ -119,6 +134,10 @@ const PricingView = () => {
     setShowPaymentModal(false);
     if (success) {
       setError('');
+      // Refetch user tier to update pricing page
+      if (currentUser) {
+        fetchUserTier();
+      }
     }
   };
 
@@ -129,6 +148,20 @@ const PricingView = () => {
         {error && (
           <div className="mb-8 bg-red-900/30 border border-red-700 text-red-200 p-4 rounded-lg">
             {error}
+          </div>
+        )}
+
+        {/* Pending Tier Status */}
+        {pendingTier && (
+          <div className="mb-8 bg-blue-900/30 border border-blue-600 text-blue-200 p-4 rounded-lg flex items-center justify-between">
+            <div>
+              <p className="font-semibold">
+                ⏳ Pending Upgrade: {pendingTier} Plan
+              </p>
+              <p className="text-sm text-blue-300 mt-1">
+                Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}. You cannot upgrade while a tier change is pending.
+              </p>
+            </div>
           </div>
         )}
 
@@ -179,9 +212,17 @@ const PricingView = () => {
                 {/* CTA Button */}
                 <button 
                   onClick={() => handlePayment(plan.ctaAction)}
-                  disabled={loading && plan.ctaAction !== 'free'}
+                  disabled={
+                    loading || 
+                    (plan.ctaAction !== 'free' && !currentUser) ||
+                    (plan.ctaAction !== 'free' && pendingTier) ||
+                    (plan.ctaAction !== 'free' && currentTier === 'Volume')
+                  }
                   className={`w-full ${BUTTON_GRADIENT} py-3 rounded-lg font-bold mb-8 ${
-                    loading && plan.ctaAction !== 'free' ? 'opacity-50 cursor-not-allowed' : ''
+                    (loading || 
+                    (plan.ctaAction !== 'free' && !currentUser) ||
+                    (plan.ctaAction !== 'free' && pendingTier) ||
+                    (plan.ctaAction !== 'free' && currentTier === 'Volume')) ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
                 >
                   {loading && plan.ctaAction !== 'free' ? 'Processing...' : plan.cta}
@@ -287,12 +328,6 @@ const PricingView = () => {
                   <td className="text-center py-3 px-4 text-green-400">7 days</td>
                   <td className="text-center py-3 px-4 text-purple-400">14 days</td>
                 </tr>
-                <tr>
-                  <td className="py-3 px-4 text-gray-300">Priority Processing</td>
-                  <td className="text-center py-3 px-4 text-gray-500">No</td>
-                  <td className="text-center py-3 px-4 text-gray-500">No</td>
-                  <td className="text-center py-3 px-4 text-green-400">Yes</td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -305,6 +340,8 @@ const PricingView = () => {
           userId={currentUser?.uid}
           userEmail={currentUser?.email}
           currentTier={currentTier}
+          pendingTier={pendingTier}
+          pendingActivationDate={pendingActivationDate}
           targetPlan={selectedPlan}
         />
       </div>

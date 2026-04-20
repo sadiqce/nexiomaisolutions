@@ -23,7 +23,8 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, onSuccess, onCancel, onE
     setIsProcessing(true);
 
     try {
-      // Confirm the payment with Stripe
+      // At this point, a subscription is already created via createPaymentIntentForPlan()
+      // We just need to confirm its payment intent
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -39,10 +40,18 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, onSuccess, onCancel, onE
         return;
       }
 
+      // Payment succeeded - now update Airtable
       if (paymentIntent.status === 'succeeded') {
-        // Payment successful - update Airtable and create Stripe subscription
-        await processPaymentSuccess(userId, selectedPlan, paymentIntent.id, userEmail);
-        onSuccess?.();
+        // Get subscription ID from payment intent metadata
+        // The subscription was created during createPaymentIntentForPlan()
+        // Pass the subscription ID and status to processPaymentSuccess
+        const result = await processPaymentSuccess(
+          userId, 
+          selectedPlan, 
+          paymentIntent.subscription, // subscription ID is in paymentIntent.subscription
+          paymentIntent.status
+        );
+        onSuccess?.(result);
       } else if (paymentIntent.status === 'requires_action') {
         setProcessError('Additional authentication required');
         setIsProcessing(false);
@@ -128,7 +137,16 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, onSuccess, onCancel, onE
  * PaymentModal - Plan upgrade modal with embedded Stripe Payment Element
  * Keeps users on the website during payment
  */
-const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier = 'Sandbox', targetPlan = 'Standard' }) => {
+const PaymentModalEmbedded = ({ 
+  isOpen, 
+  onClose, 
+  userId, 
+  userEmail, 
+  currentTier = 'Sandbox', 
+  pendingTier = null,
+  pendingActivationDate = null,
+  targetPlan = 'Standard' 
+}) => {
   const [selectedPlan, setSelectedPlan] = useState(targetPlan);
   const [clientSecret, setClientSecret] = useState('');
   const [stripePromise, setStripePromise] = useState(null);
@@ -136,11 +154,15 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  // Check if user has a pending tier
+  const hasPendingTier = !!pendingTier;
+
   // Check if user is on Volume (highest tier)
   const isOnVolume = currentTier === 'Volume';
 
   // Determine which plans can be purchased
   const canPurchasePlan = (planName) => {
+    if (hasPendingTier) return false; // Can't upgrade if pending tier exists
     if (isOnVolume) return false; // Can't upgrade from Volume
     if (planName === currentTier) return false; // Can't buy current plan
     if (currentTier === 'Standard' && planName !== 'Volume') return false; // Standard can only upgrade to Volume
@@ -148,7 +170,7 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
   };
 
   // Check if user can proceed with any purchase
-  const canProceed = !isOnVolume && selectedPlan !== currentTier;
+  const canProceed = !isOnVolume && !hasPendingTier && selectedPlan !== currentTier;
 
   const getButtonDisabledState = (planName) => {
     return !canPurchasePlan(planName) || loading || successMessage;
@@ -158,7 +180,9 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
   useEffect(() => {
     if (isOpen) {
       // Set selected plan based on what's available
-      if (isOnVolume) {
+      if (hasPendingTier) {
+        setSelectedPlan(pendingTier);
+      } else if (isOnVolume) {
         setSelectedPlan('Volume');
       } else if (currentTier === 'Standard') {
         setSelectedPlan('Volume');
@@ -169,15 +193,15 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
       setError('');
       setClientSecret('');
     }
-  }, [isOpen, currentTier, targetPlan, isOnVolume]);
+  }, [isOpen, currentTier, targetPlan, isOnVolume, hasPendingTier, pendingTier]);
 
   // Initialize Stripe and create payment intent when plan changes
   useEffect(() => {
-    if (isOpen && canProceed && !successMessage && !isOnVolume) {
+    if (isOpen && canProceed && !successMessage && !isOnVolume && !hasPendingTier) {
       createPaymentIntent();
       initializeStripe();
     }
-  }, [isOpen, selectedPlan, canProceed, successMessage, isOnVolume]);
+  }, [isOpen, selectedPlan, canProceed, successMessage, isOnVolume, hasPendingTier]);
 
   const initializeStripe = async () => {
     try {
@@ -211,11 +235,12 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
     }
   };
 
-  const handlePaymentSuccess = async () => {
-    setSuccessMessage(`Successfully upgraded to ${selectedPlan} plan!`);
+  const handlePaymentSuccess = async (result) => {
+    const message = result?.message || `Successfully upgraded to ${selectedPlan} plan!`;
+    setSuccessMessage(message);
     setTimeout(() => {
       onClose(true);
-    }, 2000);
+    }, 3000);
   };
 
   const handlePaymentError = (err) => {
@@ -255,6 +280,18 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
             <p className="text-green-400 text-sm flex items-center">
               <span className="mr-2">✓</span>
               You're on our highest tier! Enjoy your Volume plan.
+            </p>
+          </div>
+        )}
+
+        {/* Pending Tier Message */}
+        {hasPendingTier && (
+          <div className="mb-6 p-4 bg-blue-900/20 border border-blue-600 rounded-lg">
+            <p className="text-blue-400 text-sm font-semibold">
+              ⏳ Pending Upgrade: {pendingTier} Plan
+            </p>
+            <p className="text-blue-300 text-xs mt-2">
+              Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}. You cannot upgrade while a tier change is pending.
             </p>
           </div>
         )}
@@ -340,6 +377,15 @@ const PaymentModalEmbedded = ({ isOpen, onClose, userId, userEmail, currentTier 
             <div className="text-green-400 text-4xl mb-4">✓</div>
             <p className="text-white font-semibold mb-2">Maximum Plan Reached</p>
             <p className="text-gray-400 text-sm">You're already on our highest tier. Enjoy your Volume plan!</p>
+          </div>
+        ) : hasPendingTier ? (
+          <div className="text-center py-8 bg-blue-900/20 border border-blue-600 rounded-lg">
+            <div className="text-blue-400 text-4xl mb-4">⏳</div>
+            <p className="text-white font-semibold mb-2">Pending Tier Activation</p>
+            <p className="text-gray-400 text-sm mb-3">You have a tier change pending and cannot upgrade while it's active.</p>
+            <p className="text-blue-300 text-xs">
+              Your {pendingTier} plan will activate on {new Date(pendingActivationDate).toLocaleDateString()}
+            </p>
           </div>
         ) : canProceed && clientSecret && stripePromise ? (
           <Elements stripe={stripePromise} options={{ clientSecret }}>
