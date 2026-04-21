@@ -133,11 +133,11 @@ const AppContent = () => {
     }
 
     return (
-        <div className="min-h-screen bg-[#0d0a1b] text-gray-200 font-sans">
+        <div className="min-h-screen bg-white text-gray-900 font-sans">
             <Header navigate={navigate} currentPage={currentPage} signOut={handleSignOut} currentUser={currentUser} getUserTier={getUserTier} onCancelSubscription={handleCancelSubscription} onUpgradeClick={handleUpgradeClick} paymentRefreshTrigger={paymentRefreshTrigger} />
             <main>{content}</main>
-            <footer className="bg-gray-900 mt-20 p-8 text-center border-t border-purple-800">
-                <p className="text-gray-500 text-sm">&copy; {new Date().getFullYear()} Nexiom AI Solutions.</p>
+            <footer className="bg-blue-900 mt-12 p-8 text-center">
+                <p className="text-blue-100 text-sm">&copy; {new Date().getFullYear()} Nexiom AI Solutions. All rights reserved.</p>
             </footer>
         </div>
     );

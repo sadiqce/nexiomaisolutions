@@ -1,3 +1,155 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Root styles */
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #f6f8fb;
+  --color-text: #425466;
+  --color-text-secondary: #7d8fa3;
+  --color-border: #e5e7eb;
+  --color-blue: #1e40af;
+  --color-blue-light: #eff6ff;
+}
+
+/* Hide Stripe developer overlays and wallet buttons to keep the page clean */
+.StripePaymentRequestButton,
+.StripePaymentRequestButton *,
+.StripeDevTools,
+.StripeDeveloperButton,
+.stripe-devtools,
+.stripe-developer-button,
+div[aria-label*="Stripe"],
+button[title*="Stripe"] {
+  display: none !important;
+}
+
+/* Disable default browser autofill on Stripe's embedded checkout */
+.StripeElement {
+  autocomplete: off !important;
+}
+
+/* Base typography */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-white text-gray-700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-semibold;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+h1 {
+  @apply text-3xl md:text-4xl;
+  font-weight: 600;
+}
+
+h2 {
+  @apply text-2xl md:text-3xl;
+  font-weight: 600;
+}
+
+h3 {
+  @apply text-lg md:text-xl;
+  font-weight: 600;
+}
+
+p {
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply px-6 py-2.5 rounded-lg font-medium transition duration-200;
+  background-color: var(--color-blue);
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #1e3a8a;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.15);
+}
+
+.btn-secondary {
+  @apply px-6 py-2.5 rounded-lg font-medium transition duration-200;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover {
+  background-color: #f0f4f8;
+  border-color: #d1d5db;
+}
+
+/* Card styles */
+.card {
+  @apply rounded-lg border transition duration-200;
+  background-color: var(--color-bg);
+  border-color: var(--color-border);
+  padding: 1.5rem;
+}
+
+.card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Section spacing */
+.section {
+  @apply py-12 md:py-16;
+}
+
+.section-title {
+  @apply text-2xl md:text-3xl font-semibold mb-2;
+  color: var(--color-text);
+}
+
+.section-subtitle {
+  @apply text-lg text-gray-600 mb-8;
+  color: var(--color-text-secondary);
+}
+
+/* Container widths */
+.container-narrow {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Utility classes */
+.text-subtle {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.divider {
+  border-top: 1px solid var(--color-border);
+}
+

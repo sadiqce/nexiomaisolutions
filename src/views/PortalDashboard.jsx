@@ -11,7 +11,9 @@ import MetricCard from '../components/common/MetricCard';
 import PaymentModalEmbedded from '../components/payment/PaymentModalEmbedded';
 import TopupModalEmbedded from '../components/payment/TopupModalEmbedded';
 
-const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
+const BUTTON_PRIMARY = "bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm hover:shadow-md";
+const BUTTON_SECONDARY = "border border-gray-300 hover:border-gray-400 text-gray-900 hover:bg-gray-50 transition";
+const BUTTON_DANGER = "bg-red-600 hover:bg-red-700 text-white transition shadow-sm hover:shadow-md";
 
 const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, onPaymentSuccess }) => {
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -401,15 +403,15 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
 
     if (!isEmailVerified) {
         return (
-            <section className="max-w-7xl mx-auto px-4 py-32">
+            <section className="max-w-7xl mx-auto px-4 py-24">
                 <div className="flex justify-center">
-                    <div className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-gray-800 border border-purple-700 text-center">
-                        <h2 className="text-3xl font-extrabold mb-4">Verify Your Email</h2>
-                        <p className="text-gray-400 mb-6">
+                    <div className="w-full max-w-lg p-8 rounded-lg shadow-lg bg-white border border-gray-200 text-center">
+                        <h2 className="text-2xl font-semibold mb-4 text-gray-900">Verify Your Email</h2>
+                        <p className="text-gray-600 mb-6">
                             Your account has been created, but you need to verify your email address to access the dashboard. Please check your inbox for a verification link.
                         </p>
-                        {info && <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-3 rounded mb-4 text-sm">{info}</div>}
-                        <button onClick={handleResendVerification} className={`${BUTTON_GRADIENT} px-6 py-2 rounded-xl font-medium`}>
+                        {info && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4 text-sm">{info}</div>}
+                        <button onClick={handleResendVerification} className={`${BUTTON_PRIMARY} px-6 py-2 rounded-lg font-medium`}>
                             Resend Verification Email
                         </button>
                     </div>
@@ -419,60 +421,42 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     }
 
     return (
-        <section className="max-w-7xl mx-auto px-4 pt-4 pb-8">
-            <div className="flex justify-between items-start mb-3">
-                <div>
-                    <h2 className="text-4xl font-extrabold">Welcome, {currentUser?.displayName}!</h2>
-                    <p className="text-xl text-gray-400">Your Data Dashboard</p>
+        <section className="min-h-screen bg-gray-100">
+            <div className="bg-blue-700 px-4 py-5 shadow-lg">
+                <div className="max-w-7xl mx-auto">
+                    <h2 className="text-2xl font-semibold text-white">Welcome, {currentUser?.displayName}!</h2>
                 </div>
             </div>
-
-            <div className="grid md:grid-cols-3 gap-2 mb-3">
-                <MetricCard title="Total Files" value={uploadedFiles.length} unit="" color="purple" time="All Time" />
-                <MetricCard title="Storage Used" value={calculateStorageUsed()} unit=" MB" color="green" time="Calculated" />
-                <MetricCard title="Account Status" value="Active" unit="" color="green" time="Verified" />
-            </div>
-
-            {/* Top-Up Credits Card */}
-            {topupCredits > 0 && (
-                <div className="mb-3 p-4 rounded-xl bg-gradient-to-r from-blue-900/30 to-cyan-900/30 border border-blue-600">
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <p className="text-gray-400 text-sm">Available Top-Up Credits</p>
-                            <h3 className="text-2xl font-bold text-cyan-400">{topupCredits} documents</h3>
-                        </div>
-                        <button
-                            onClick={handleOpenTopupModal}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition"
-                        >
-                            Buy More
-                        </button>
-                    </div>
-                </div>
-            )}
             
-            <div className="p-6 rounded-xl bg-gray-800 border border-fuchsia-600 shadow-2xl">
-                <h3 className="text-2xl font-semibold mb-6 text-white border-b border-gray-700 pb-3">File Management</h3>
+            <div className="max-w-7xl mx-auto px-4 pt-3 pb-8">
+                <div className="grid md:grid-cols-3 gap-3 mb-3">
+                    <MetricCard title="Total Files" value={uploadedFiles.length} unit="" color="purple" time="All Time" />
+                    <MetricCard title="Storage Used" value={calculateStorageUsed()} unit=" MB" color="green" time="Calculated" />
+                    <MetricCard title="Account Status" value="Active" unit="" color="green" time="Verified" />
+                </div>
+            
+            <div className="p-6 rounded-xl bg-white border-2 border-gray-300 shadow-lg hover:shadow-xl transition">
+                <h3 className="text-xl font-bold mb-4 text-gray-900 border-b-2 border-blue-600 pb-3">📁 File Management</h3>
                 <input type="file" ref={fileInputRef} multiple className="hidden" onChange={(e) => handleFileTransfer(e.target.files)} />
                 
-                <div className="mb-4 flex gap-2">
+                <div className="mb-3 flex gap-3">
                     <button 
                         onClick={() => fileInputRef.current?.click()} 
-                        className={`${BUTTON_GRADIENT} px-4 py-2 rounded-lg font-medium text-sm`}
+                        className={`${BUTTON_PRIMARY} px-5 py-2 rounded-lg font-semibold text-sm shadow-md`}
                     >
-                        Upload Files
+                        ⬆️ Upload Files
                     </button>
                     <button 
                         onClick={handleRefreshFiles}
                         disabled={isRefreshing}
-                        className={`px-4 py-2 rounded-lg font-medium text-sm ${isRefreshing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
+                        className={`px-5 py-2 rounded-lg font-semibold text-sm transition shadow-md ${isRefreshing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-200 text-gray-900 hover:bg-gray-300'}`}
                     >
-                        {isRefreshing ? 'Refreshing...' : 'Refresh Status'}
+                        🔄 {isRefreshing ? 'Refreshing...' : 'Refresh'}
                     </button>
                 </div>
 
                 {info && (
-                    <div className={`mb-4 p-3 rounded-lg text-sm whitespace-pre-wrap ${info.includes('Blocked') || info.includes('Failed') ? 'bg-red-900/50 border border-red-500 text-red-200' : 'bg-green-900/50 border border-green-500 text-green-200'}`}>
+                    <div className={`mb-3 p-3 rounded-lg text-sm whitespace-pre-wrap ${info.includes('Blocked') || info.includes('Failed') ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-green-50 border border-green-200 text-green-700'}`}>
                         {info}
                     </div>
                 )}
@@ -482,14 +466,15 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`border-4 border-dashed rounded-xl p-4 mb-4 text-center cursor-pointer ${isDragging ? 'border-fuchsia-500 bg-gray-900' : 'border-purple-700'}`}
+                    className={`border-4 border-dashed rounded-lg p-6 mb-4 text-center cursor-pointer transition font-semibold ${isDragging ? 'border-blue-500 bg-blue-100' : 'border-blue-300 bg-blue-50 hover:bg-blue-100'}`}
                     onClick={() => fileInputRef.current?.click()}
                 >
-                    <svg className="mx-auto h-10 w-10 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 014 4.975V15a4 4 0 01-4 4H7a4 4 0 010-8z"></path></svg>
-                    <p className="mt-2 text-md font-medium text-white">Drag & Drop files or Click to Upload</p>
+                    <svg className="mx-auto h-12 w-12 text-blue-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 014 4.975V15a4 4 0 01-4 4H7a4 4 0 010-8z"></path></svg>
+                    <p className="text-gray-900 text-lg">Drag & Drop files or Click to Upload</p>
                 </div>
                 
                 <FileList files={uploadedFiles} />
+            </div>
             </div>
 
             {/* Payment Modal */}

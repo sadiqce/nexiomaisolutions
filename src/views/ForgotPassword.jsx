@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
-
 const ForgotPassword = ({ navigate }) => {
     const [email, setEmail] = useState('');
     const [message, setMessage] = useState('');
@@ -19,44 +17,60 @@ const ForgotPassword = ({ navigate }) => {
             setError('');
             setLoading(true);
             
-            // Call Firebase Password Reset
             await resetPassword(email);
             setMessage('Check your inbox for password reset instructions.');
             
-            // Optional: Redirect after delay
             setTimeout(() => {
                 navigate('PortalLogin');
             }, 5000);
 
         } catch (err) {
             console.error(err);
-            setError('Failed to reset password. Ensure the email is correct.');
+            setError('Failed to send reset email. Check the email address and try again.');
         } finally {
             setLoading(false);
         }
     };
     
     return (
-        <section className="max-w-7xl mx-auto px-4 py-40">
-            <h2 className="text-4xl font-extrabold mb-12 text-center">Reset Your Password</h2>
-            <div className="flex justify-center">
-                <div className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-gray-800 border border-purple-700">
-                    <h3 className="text-3xl font-bold mb-4 text-fuchsia-500 text-center">Password Recovery</h3>
-                    <p className="text-gray-400 mb-6 text-center">Enter the email address associated with your account.</p>
-                    
-                    {error && <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded mb-4 text-center text-sm">{error}</div>}
-                    {message && <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-2 rounded mb-4 text-center text-sm">{message}</div>}
+        <section className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center px-4 py-12">
+            <div className="w-full max-w-md">
+                <div className="text-center mb-8">
+                    <div className="mb-4 inline-block p-3 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg">
+                        <div className="text-white text-2xl font-bold">Nexiom</div>
+                    </div>
+                    <h1 className="text-3xl font-bold text-gray-900 mb-2">Reset your password</h1>
+                    <p className="text-gray-600 text-sm">Enter your email address and we'll send you a reset link</p>
+                </div>
+                
+                <div className="bg-white border border-blue-200 rounded-lg p-6 sm:p-8 shadow-sm hover:shadow-md transition">
+                    {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>}
+                    {message && <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">{message}</div>}
                     
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white"/>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">Email address</label>
+                            <input 
+                                id="email"
+                                type="email" 
+                                value={email} 
+                                onChange={(e) => setEmail(e.target.value)} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="you@company.com"
+                            />
                         </div>
-                        <button disabled={loading} type="submit" className={`w-full ${BUTTON_GRADIENT}`}>
-                            {loading ? 'Sending...' : 'Send Reset Link'}
+                        <button 
+                            disabled={loading} 
+                            type="submit" 
+                            className={`w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg transition ${
+                                loading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
+                            }`}
+                        >
+                            {loading ? 'Sending...' : 'Send reset link'}
                         </button>
-                        <p className="text-center text-sm text-gray-500 pt-2">
-                            <a href="#" onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} className="text-purple-500 hover:underline">Back to Sign In</a>
+                        <p className="text-center text-sm pt-2 border-t border-blue-100 mt-4">
+                            <a href="#" onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} className="text-blue-600 hover:text-blue-700 font-semibold">Back to sign in</a>
                         </p>
                     </form>
                 </div>

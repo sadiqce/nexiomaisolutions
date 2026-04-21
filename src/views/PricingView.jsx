@@ -4,8 +4,6 @@ import { getUser } from '../services/airtableService';
 import PaymentModalEmbedded from '../components/payment/PaymentModalEmbedded';
 
 const PricingView = () => {
-  const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
-  
   const { currentUser } = useAuth();
   const [loading] = useState(false);
   const [error, setError] = useState('');
@@ -38,61 +36,49 @@ const PricingView = () => {
   const plans = [
     {
       name: 'Sandbox',
-      subtitle: 'Free Tier',
       price: '$0',
-      period: '/ month',
-      description: 'A strictly restricted test drive. See the AI successfully extract data, proving the system works.',
-      icon: '🧪',
+      description: 'Get started for free',
       features: [
         { text: '5 documents per month', included: true },
-        { text: 'Max file size: 2 MB', included: true },
-        { text: 'Max document length: 2 pages', included: true },
+        { text: '2 MB max file size', included: true },
+        { text: '2 pages max per document', included: true },
         { text: '24-hour file retention', included: true },
-        { text: 'Standard AI extraction (Material, Lot Number)', included: true },
-        { text: 'View-only access to Compliance Ledger', included: true },
+        { text: 'Standard AI extraction', included: true },
         { text: 'Top-Up packs available', included: false },
       ],
-      cta: 'Get Started Free',
+      cta: 'Get Started',
       ctaAction: 'free',
       highlighted: false,
     },
     {
       name: 'Standard',
-      subtitle: 'Daily Compliance',
       price: '$49',
-      period: '/ month',
-      description: 'Bread-and-butter tier for businesses doing daily or weekly compliance uploads with auto-subscription and top-up flexibility.',
-      icon: '⚡',
+      description: 'For daily operations',
       features: [
         { text: '100 documents per month', included: true },
-        { text: 'Max file size: 10 MB', included: true },
-        { text: 'Max document length: 10 pages', included: true },
+        { text: '10 MB max file size', included: true },
+        { text: '10 pages max per document', included: true },
         { text: '7-day file retention', included: true },
         { text: 'Standard AI extraction', included: true },
-        { text: 'Top-Up packs available ($20/50 docs)', included: true },
-        { text: 'Auto-renewal with cancel anytime', included: true },
+        { text: 'Top-Up packs ($20/50 docs)', included: true },
       ],
-      cta: 'Subscribe Now',
+      cta: 'Subscribe',
       ctaAction: 'standard',
       highlighted: true,
     },
     {
       name: 'Volume',
-      subtitle: 'High Volume',
       price: '$149',
-      period: '/ month',
-      description: 'For heavy users processing bulk shipments with auto-subscription and flexible top-ups.',
-      icon: '🚀',
+      description: 'For high volume users',
       features: [
         { text: '500 documents per month', included: true },
-        { text: 'Max file size: 25 MB', included: true },
-        { text: 'Max document length: 25 pages', included: true },
+        { text: '25 MB max file size', included: true },
+        { text: '25 pages max per document', included: true },
         { text: '14-day file retention', included: true },
         { text: 'Standard AI extraction', included: true },
-        { text: 'Top-Up packs available ($20/50 docs)', included: true },
-        { text: 'Auto-renewal with cancel anytime', included: true },
+        { text: 'Top-Up packs ($20/50 docs)', included: true },
       ],
-      cta: 'Subscribe Now',
+      cta: 'Subscribe',
       ctaAction: 'volume',
       highlighted: false,
     },
@@ -100,32 +86,27 @@ const PricingView = () => {
 
   const handlePayment = (planType) => {
     if (planType === 'free') {
-      // Sandbox (Free) plan - navigate to home
       window.location.assign('/');
       return;
     }
 
     if (!currentUser) {
-      // Not logged in - redirect to login
       window.location.assign('/portal/login?redirect=pricing');
       return;
     }
 
-    // Check if user has a pending tier
     if (pendingTier) {
-      setError(`⏳ You already have ${pendingTier} plan scheduled for activation. You cannot upgrade while a tier change is pending.`);
+      setError(`You already have ${pendingTier} plan scheduled for activation.`);
       setTimeout(() => setError(''), 5000);
       return;
     }
 
-    // Check if user is already on Volume (highest tier)
     if (currentTier === 'Volume') {
-      setError('✓ You are already on the highest tier (Volume)');
+      setError('You are already on the highest tier.');
       setTimeout(() => setError(''), 5000);
       return;
     }
 
-    // Open payment modal for paid plans
     setSelectedPlan(planType === 'standard' ? 'Standard' : 'Volume');
     setShowPaymentModal(true);
   };
@@ -134,7 +115,6 @@ const PricingView = () => {
     setShowPaymentModal(false);
     if (success) {
       setError('');
-      // Refetch user tier to update pricing page
       if (currentUser) {
         fetchUserTier();
       }
@@ -142,72 +122,56 @@ const PricingView = () => {
   };
 
   return (
-    <section className="min-h-screen bg-gray-900 py-16 px-4">
-      <div className="max-w-7xl mx-auto">
+    <section className="min-h-screen bg-gradient-to-b from-blue-50 to-white py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto">
         {/* Error Message */}
         {error && (
-          <div className="mb-8 bg-red-900/30 border border-red-700 text-red-200 p-4 rounded-lg">
+          <div className="mb-8 bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm">
             {error}
           </div>
         )}
 
         {/* Pending Tier Status */}
         {pendingTier && (
-          <div className="mb-8 bg-blue-900/30 border border-blue-600 text-blue-200 p-4 rounded-lg flex items-center justify-between">
-            <div>
-              <p className="font-semibold">
-                ⏳ Pending Upgrade: {pendingTier} Plan
-              </p>
-              <p className="text-sm text-blue-300 mt-1">
-                Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}. You cannot upgrade while a tier change is pending.
-              </p>
-            </div>
+          <div className="mb-8 bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg text-sm">
+            <p className="font-semibold">Pending Upgrade: {pendingTier} Plan</p>
+            <p className="mt-1">Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}.</p>
           </div>
         )}
 
         {/* Header */}
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-extrabold mb-4">Transparent, Usage-Based Pricing</h1>
-          <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            Scale from testing to high-volume processing. Hard limits protect your costs. Top-ups available whenever you need more.
-          </p>
+        <div className="text-center mb-12 sm:mb-16">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-gray-900 mb-3 sm:mb-4\">Simple, transparent pricing</h1>
+          <p className="text-gray-600 text-base sm:text-lg max-w-2xl mx-auto\">Scale your operations with flexible plans. Cancel anytime, no hidden fees.</p>
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid md:grid-cols-3 gap-8 mb-16">
+        <div className="grid md:grid-cols-3 gap-6 sm:gap-8 mb-12 sm:mb-16">
           {plans.map((plan, index) => (
             <div
               key={index}
-              className={`relative rounded-2xl transition duration-300 transform hover:scale-105 ${
+              className={`rounded-lg border transition ${
                 plan.highlighted
-                  ? 'bg-gradient-to-br from-purple-900 to-fuchsia-900 border-2 border-fuchsia-500 shadow-2xl lg:scale-105'
-                  : 'bg-gray-800 border border-gray-700'
+                  ? 'border-blue-300 bg-blue-50 shadow-lg'
+                  : 'border-gray-200 bg-white hover:shadow-md'
               }`}
             >
               {plan.highlighted && (
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                  <span className="bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-4 py-1 rounded-full text-sm font-bold">
-                    Most Popular
-                  </span>
+                <div className="px-6 py-2 bg-blue-600 text-white text-xs font-semibold rounded-t-lg text-center">
+                  Most Popular
                 </div>
               )}
 
-              <div className="p-8">
-                {/* Plan Icon and Name */}
-                <div className="text-5xl mb-3">{plan.icon}</div>
-                <h3 className="text-2xl font-bold mb-1">{plan.name}</h3>
-                <p className="text-fuchsia-400 text-sm mb-4">{plan.subtitle}</p>
-
-                {/* Price */}
-                <div className="mb-2">
+              <div className="p-6 sm:p-8">
+                {/* Plan Name and Price */}
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{plan.name}</h3>
+                <p className="text-sm text-gray-600 mb-4">{plan.description}</p>
+                <div className="mb-6">
                   <div className="flex items-baseline">
-                    <span className="text-4xl font-extrabold">{plan.price}</span>
-                    <span className="text-gray-400 ml-2">{plan.period}</span>
+                    <span className="text-3xl font-semibold text-gray-900">{plan.price}</span>
+                    <span className="text-gray-600 ml-2 text-sm">/month</span>
                   </div>
                 </div>
-
-                {/* Description */}
-                <p className="text-gray-300 text-sm mb-6">{plan.description}</p>
 
                 {/* CTA Button */}
                 <button 
@@ -218,7 +182,11 @@ const PricingView = () => {
                     (plan.ctaAction !== 'free' && pendingTier) ||
                     (plan.ctaAction !== 'free' && currentTier === 'Volume')
                   }
-                  className={`w-full ${BUTTON_GRADIENT} py-3 rounded-lg font-bold mb-8 ${
+                  className={`w-full px-4 py-2.5 font-medium rounded-lg text-sm transition mb-6 ${
+                    plan.highlighted
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                  } ${
                     (loading || 
                     (plan.ctaAction !== 'free' && !currentUser) ||
                     (plan.ctaAction !== 'free' && pendingTier) ||
@@ -229,14 +197,17 @@ const PricingView = () => {
                 </button>
 
                 {/* Features */}
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold text-gray-400 uppercase">What's Included</p>
+                <div className="space-y-2.5">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start">
-                      <span className={`mr-3 flex-shrink-0 ${feature.included ? 'text-green-400' : 'text-gray-600'}`}>
-                        {feature.included ? '✓' : '✗'}
+                      <span className={`mr-2.5 flex-shrink-0 text-sm font-medium ${
+                        feature.included ? 'text-blue-600' : 'text-gray-400'
+                      }`}>
+                        {feature.included ? '✓' : '–'}
                       </span>
-                      <span className={feature.included ? 'text-gray-200 text-sm' : 'text-gray-500 text-sm line-through'}>
+                      <span className={`text-sm ${
+                        feature.included ? 'text-gray-700' : 'text-gray-400 line-through'
+                      }`}>
                         {feature.text}
                       </span>
                     </div>
@@ -248,89 +219,55 @@ const PricingView = () => {
         </div>
 
         {/* Top-Up Info */}
-        <div className="bg-blue-900/20 border border-blue-700/50 rounded-xl p-8 mb-8">
-          <h2 className="text-2xl font-bold text-white mb-4 flex items-center">
-            <span className="text-3xl mr-3">📦</span>
-            Document Top-Ups
-          </h2>
-          <div className="grid md:grid-cols-2 gap-8">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 sm:p-8 mb-12 sm:mb-16">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Need more documents?</h2>
+          <p className="text-gray-600 text-sm mb-4">Purchase additional documents anytime with no expiration. They roll over month to month.</p>
+          <div className="flex items-center gap-2 sm:gap-4">
             <div>
-              <p className="text-gray-300 mb-4">
-                Hit your monthly limit? No problem. Purchase document top-ups anytime:
-              </p>
-              <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <p className="text-white font-bold text-lg mb-2">$20 for 50 documents</p>
-                <p className="text-green-400 text-sm mt-3">✓ No expiration</p>
-                <p className="text-green-400 text-sm">✓ Rolls over month-to-month</p>
-              </div>
+              <p className="font-semibold text-gray-900">$20 for 50 documents</p>
             </div>
-            <div>
-              <p className="text-gray-300 mb-4">
-                Top-ups are perfect for:
-              </p>
-              <ul className="space-y-2 text-gray-300">
-                <li className="flex items-start">
-                  <span className="text-fuchsia-400 mr-2">•</span>
-                  <span>Unexpected volume spikes</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="text-fuchsia-400 mr-2">•</span>
-                  <span>Processing historical backlogs</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="text-fuchsia-400 mr-2">•</span>
-                  <span>Seasonal business fluctuations</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="text-fuchsia-400 mr-2">•</span>
-                  <span>Testing new extraction features</span>
-                </li>
-              </ul>
-            </div>
+            <div className="text-gray-600 text-sm">Perfect for spikes, backlogs, or testing.</div>
           </div>
         </div>
 
-        {/* Usage Limits Info */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-8">
-          <h2 className="text-2xl font-bold mb-6">📊 Plan Comparison & Limits</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-600">
-                  <th className="text-left py-3 px-4 font-bold">Feature</th>
-                  <th className="text-center py-3 px-4 font-bold">Sandbox</th>
-                  <th className="text-center py-3 px-4 font-bold">Standard</th>
-                  <th className="text-center py-3 px-4 font-bold">Volume</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-700">
-                <tr>
-                  <td className="py-3 px-4 text-gray-300">Monthly Limit</td>
-                  <td className="text-center py-3 px-4 text-yellow-400">5 docs</td>
-                  <td className="text-center py-3 px-4 text-green-400">100 docs</td>
-                  <td className="text-center py-3 px-4 text-purple-400">500 docs</td>
-                </tr>
-                <tr>
-                  <td className="py-3 px-4 text-gray-300">Max File Size</td>
-                  <td className="text-center py-3 px-4 text-yellow-400">2 MB</td>
-                  <td className="text-center py-3 px-4 text-green-400">10 MB</td>
-                  <td className="text-center py-3 px-4 text-purple-400">25 MB</td>
-                </tr>
-                <tr>
-                  <td className="py-3 px-4 text-gray-300">Max Pages per Doc</td>
-                  <td className="text-center py-3 px-4 text-yellow-400">2 pages</td>
-                  <td className="text-center py-3 px-4 text-green-400">10 pages</td>
-                  <td className="text-center py-3 px-4 text-purple-400">25 pages</td>
-                </tr>
-                <tr>
-                  <td className="py-3 px-4 text-gray-300">File Retention</td>
-                  <td className="text-center py-3 px-4 text-yellow-400">24 hours</td>
-                  <td className="text-center py-3 px-4 text-green-400">7 days</td>
-                  <td className="text-center py-3 px-4 text-purple-400">14 days</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        {/* Comparison Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-3 px-4 font-semibold text-gray-900">Feature</th>
+                <th className="text-center py-3 px-4 font-semibold text-gray-900">Sandbox</th>
+                <th className="text-center py-3 px-4 font-semibold text-gray-900">Standard</th>
+                <th className="text-center py-3 px-4 font-semibold text-gray-900">Volume</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              <tr>
+                <td className="py-3 px-4 text-gray-700">Monthly documents</td>
+                <td className="text-center py-3 px-4 text-gray-600">5</td>
+                <td className="text-center py-3 px-4 text-gray-600">100</td>
+                <td className="text-center py-3 px-4 text-gray-600">500</td>
+              </tr>
+              <tr>
+                <td className="py-3 px-4 text-gray-700">Max file size</td>
+                <td className="text-center py-3 px-4 text-gray-600">2 MB</td>
+                <td className="text-center py-3 px-4 text-gray-600">10 MB</td>
+                <td className="text-center py-3 px-4 text-gray-600">25 MB</td>
+              </tr>
+              <tr>
+                <td className="py-3 px-4 text-gray-700">Pages per document</td>
+                <td className="text-center py-3 px-4 text-gray-600">2</td>
+                <td className="text-center py-3 px-4 text-gray-600">10</td>
+                <td className="text-center py-3 px-4 text-gray-600">25</td>
+              </tr>
+              <tr>
+                <td className="py-3 px-4 text-gray-700">File retention</td>
+                <td className="text-center py-3 px-4 text-gray-600">24 hours</td>
+                <td className="text-center py-3 px-4 text-gray-600">7 days</td>
+                <td className="text-center py-3 px-4 text-gray-600">14 days</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         {/* Payment Modal */}

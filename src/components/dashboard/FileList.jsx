@@ -53,37 +53,37 @@ const FileList = ({ files }) => {
 
     return (
         <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-700">
+            <table className="min-w-full divide-y divide-gray-200">
                 <thead>
-                    <tr>
-                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Original Filename</th>
-                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">New File Name</th>
-                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Size</th>
-                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Upload Date</th>
-                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Action</th>
+                    <tr className="bg-gray-50">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Original Filename</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">New File Name</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Size</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Upload Date</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Action</th>
                     </tr>
                 </thead>
-                <tbody className="bg-gray-800 divide-y divide-gray-700 text-white">
+                <tbody className="bg-white divide-y divide-gray-200 text-gray-900">
                     {files.length === 0 ? (
                         <tr>
-                            <td colSpan="5" className="py-2 text-center text-gray-500">
+                            <td colSpan="5" className="py-2 text-center text-gray-500 text-sm">
                                 No files found. Upload a file to get started.
                             </td>
                         </tr>
                     ) : (
                         files.map(file => (
-                            <tr key={file.id} className="border-b border-gray-700 hover:bg-gray-700 transition duration-150">
-                                <td className="py-1 px-2 truncate max-w-xs">{file.originalName}</td>
-                                <td className="py-1 px-2 truncate max-w-xs text-purple-300 font-mono text-sm">{file.newName || '-'}</td>
-                                <td className="py-1 px-2">{typeof file.size === 'number' ? formatFileSize(file.size) : file.size}</td>
-                                <td className="py-1 px-2 text-sm text-gray-400">{formatDate(file.uploadDate)}</td>
-                                <td className="py-1 px-2">
+                            <tr key={file.id} className="border-b border-gray-200 hover:bg-gray-50 transition duration-150">
+                                <td className="py-1.5 px-3 truncate max-w-xs text-sm">{file.originalName}</td>
+                                <td className="py-1.5 px-3 truncate max-w-xs text-blue-600 font-mono text-xs">{file.newName || '-'}</td>
+                                <td className="py-1.5 px-3 text-sm">{typeof file.size === 'number' ? formatFileSize(file.size) : file.size}</td>
+                                <td className="py-1.5 px-3 text-xs text-gray-600">{formatDate(file.uploadDate)}</td>
+                                <td className="py-1.5 px-3">
                                     {file.url ? (
-                                        <button onClick={() => handleDownload(file)} className="text-fuchsia-400 hover:text-fuchsia-300 hover:underline">
+                                        <button onClick={() => handleDownload(file)} className="text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium">
                                             Download
                                         </button>
                                     ) : (
-                                        <span className="text-yellow-500 text-xs font-medium cursor-help" title="File is being processed. Refresh the page in a moment.">⏳ Processing</span>
+                                        <span className="text-yellow-600 text-xs font-medium cursor-help" title="File is being processed. Refresh the page in a moment.">⏳ Processing</span>
                                     )}
                                 </td>
                             </tr>

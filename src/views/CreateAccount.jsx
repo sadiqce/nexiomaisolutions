@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { createAirtableUser, checkUserExists } from '../services/airtableService';
 
-const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
-
 const CreateAccount = ({ navigate }) => {
     const [formData, setFormData] = useState({
         username: '',
@@ -31,19 +29,17 @@ const CreateAccount = ({ navigate }) => {
         setError('');
         setInfo('');
 
-        // 1. Local Validations
         if (formData.password !== formData.confirmPassword) {
             return setError("Passwords do not match.");
         }
 
         if (!validatePassword(formData.password)) {
-            return setError("Password must be at least 12 characters, with uppercase, lowercase, and numbers.");
+            return setError("Password must be at least 12 characters with uppercase, lowercase, and numbers.");
         }
 
         try {
             setLoading(true);
 
-            // 2. Check Uniqueness in Airtable
             try {
                 const usernameExists = await checkUserExists('Username', formData.username);
                 if (usernameExists) {
@@ -54,31 +50,28 @@ const CreateAccount = ({ navigate }) => {
                 const emailExists = await checkUserExists('Email', formData.email);
                 if (emailExists) {
                     setLoading(false);
-                    return setError("An account with this email is already registered.");
+                    return setError("An account with this email already exists.");
                 }
             } catch (airtableErr) {
                 console.error("Airtable check error:", airtableErr);
                 setLoading(false);
-                return setError("Unable to verify username/email availability. Please try again.");
+                return setError("Unable to verify availability. Please try again.");
             }
 
-            // 3. Create User in Firebase Auth
             const userCredential = await signup(formData.email, formData.password);
             const user = userCredential.user;
 
-            // 4. Update Firebase Profile
             await updateUserProfile(user, {
                 displayName: formData.username
             });
 
-            // 5. Create Airtable User Record
             await createAirtableUser({
                 username: formData.username,
                 email: formData.email,
                 uid: user.uid
             });
 
-            setInfo("Account created successfully! Please check your email to verify your account before logging in.");
+            setInfo("Account created! Check your email to verify before logging in.");
             
             setTimeout(() => {
                 navigate('PortalDashboard');
@@ -87,9 +80,9 @@ const CreateAccount = ({ navigate }) => {
         } catch (err) {
             console.error(err);
             if (err.code === 'auth/email-already-in-use') {
-                setError('This email is already in use by another account.');
+                setError('This email is already in use.');
             } else {
-                setError('Failed to create account. ' + err.message);
+                setError('Failed to create account: ' + err.message);
             }
         } finally {
             setLoading(false);
@@ -97,42 +90,93 @@ const CreateAccount = ({ navigate }) => {
     };
 
     return (
-        <section className="max-w-7xl mx-auto px-4 py-32">
-            <h2 className="text-4xl font-extrabold mb-8 text-center">Create Account</h2>
-            <div className="flex justify-center">
-                <div className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-gray-800 border border-purple-700">
-                    
-                    {error && <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded mb-4 text-sm">{error}</div>}
-                    {info && <div className="bg-green-900/50 border border-green-500 text-green-200 px-4 py-3 rounded mb-4 text-sm">{info}</div>}
+        <section className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center px-4 py-12">
+            <div className="w-full max-w-md">
+                <div className="text-center mb-8">
+                    <div className="mb-4 inline-block p-3 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg">
+                        <div className="text-white text-2xl font-bold">Nexiom</div>
+                    </div>
+                    <h1 className="text-3xl font-bold text-gray-900 mb-2">Create your account</h1>
+                    <p className="text-gray-600 text-sm">Join Nexiom AI Solutions and start processing documents</p>
+                </div>
+
+                <div className="bg-white border border-blue-200 rounded-lg p-6 sm:p-8 shadow-sm hover:shadow-md transition">
+                    {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>}
+                    {info && <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">{info}</div>}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Username</label>
-                            <input type="text" name="username" value={formData.username} onChange={handleChange} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white" placeholder="johndoe"/>
+                            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                            <input 
+                                id="username"
+                                type="text" 
+                                name="username" 
+                                value={formData.username} 
+                                onChange={handleChange} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="johndoe"
+                            />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
-                            <input type="email" name="email" value={formData.email} onChange={handleChange} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white" placeholder="you@company.com"/>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">Email address</label>
+                            <input 
+                                id="email"
+                                type="email" 
+                                name="email" 
+                                value={formData.email} 
+                                onChange={handleChange} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="you@company.com"
+                            />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
-                            <input type="password" name="password" value={formData.password} onChange={handleChange} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white"/>
-                            <p className="text-xs text-gray-500 mt-1">12+ chars, Uppercase, Lowercase, Number.</p>
+                            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                            <input 
+                                id="password"
+                                type="password" 
+                                name="password" 
+                                value={formData.password} 
+                                onChange={handleChange} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="••••••••"
+                            />
+                            <p className="text-xs text-gray-600 mt-1">At least 12 characters with uppercase, lowercase, and numbers</p>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Confirm Password</label>
-                            <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white"/>
+                            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">Confirm password</label>
+                            <input 
+                                id="confirmPassword"
+                                type="password" 
+                                name="confirmPassword" 
+                                value={formData.confirmPassword} 
+                                onChange={handleChange} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="••••••••"
+                            />
                         </div>
 
-                        <button disabled={loading} type="submit" className={`w-full ${BUTTON_GRADIENT} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                            {loading ? 'Creating Account...' : 'Sign Up'}
+                        <button 
+                            disabled={loading} 
+                            type="submit" 
+                            className={`w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg transition ${
+                                loading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
+                            }`}
+                        >
+                            {loading ? 'Creating account...' : 'Create account'}
                         </button>
                     </form>
 
-                    <div className="mt-6 text-center text-sm text-gray-400">
-                        Already have an account?{' '}
-                        <button onClick={() => navigate('PortalLogin')} className="text-fuchsia-400 hover:underline">
-                            Log In
+                    <div className="mt-6 pt-6 border-t border-blue-100 text-center text-sm">
+                        <span className="text-gray-600">Already have an account? </span>
+                        <button 
+                            onClick={() => navigate('PortalLogin')} 
+                            className="text-blue-600 hover:text-blue-700 font-semibold"
+                        >
+                            Sign in
                         </button>
                     </div>
                 </div>

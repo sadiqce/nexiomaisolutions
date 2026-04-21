@@ -82,18 +82,18 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="bg-blue-600/20 border border-blue-600 rounded-lg p-4">
-        <h4 className="text-white font-semibold mb-2">Order Summary</h4>
-        <div className="space-y-2 text-sm text-gray-300">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h4 className="text-gray-900 font-semibold mb-2">Order Summary</h4>
+        <div className="space-y-2 text-sm text-gray-700">
           <div className="flex justify-between">
             <span>{selectedPlan} Plan</span>
-            <span className="text-white font-semibold">{displayPrice}/mo</span>
+            <span className="text-gray-900 font-semibold">{displayPrice}/mo</span>
           </div>
-          <div className="pt-2 border-t border-blue-600">
-            <p className="text-xs text-gray-400 mt-2">
+          <div className="pt-2 border-t border-blue-200">
+            <p className="text-xs text-gray-600 mt-2">
               ✓ {plan.monthlyLimit} documents/month
             </p>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-600">
               ✓ Up to {plan.maxPages} pages per document
             </p>
           </div>
@@ -101,7 +101,7 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
       </div>
 
       {/* Stripe Payment Element */}
-      <div className="bg-gray-700 p-4 rounded-lg">
+      <div className="bg-white p-4 rounded-lg border border-gray-200">
         <PaymentElement
           options={{
             layout: 'tabs',
@@ -115,7 +115,7 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
 
       {/* Error message */}
       {processError && (
-        <div className="bg-red-900/20 border border-red-600 text-red-400 px-4 py-3 rounded-lg text-sm">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {processError}
         </div>
       )}
@@ -126,20 +126,20 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
           type="button"
           onClick={() => onCancel()}
           disabled={isProcessing}
-          className="flex-1 px-4 py-3 border border-gray-600 rounded-lg text-white hover:bg-gray-700 disabled:opacity-50 transition font-semibold"
+          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-gray-900 hover:bg-gray-50 disabled:opacity-50 transition font-semibold"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={!stripe || isProcessing}
-          className="flex-1 px-4 py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white font-semibold transition"
+          className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white font-semibold transition"
         >
           {isProcessing ? 'Processing...' : `Pay ${displayPrice}`}
         </button>
       </div>
 
-      <p className="text-xs text-gray-400 text-center">
+      <p className="text-xs text-gray-600 text-center">
         Your payment information is secured by Stripe
       </p>
     </form>
@@ -261,13 +261,13 @@ const PaymentModalEmbedded = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg shadow-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-2xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-white">Upgrade Your Plan</h2>
+        <div className="flex justify-between items-center mb-6 pb-4 border-b-2 border-blue-200">
+          <h2 className="text-2xl font-bold text-blue-700">Upgrade Your Plan</h2>
           <button
             onClick={() => onClose(false)}
-            className="text-gray-400 hover:text-white text-2xl font-bold"
+            className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
             disabled={loading}
           >
             ✕
@@ -276,15 +276,15 @@ const PaymentModalEmbedded = ({
 
         {/* Success message */}
         {successMessage && (
-          <div className="mb-6 bg-green-900/20 border border-green-600 text-green-400 px-4 py-3 rounded-lg text-sm">
+          <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm font-semibold">
             ✓ {successMessage}
           </div>
         )}
 
         {/* Volume Plan Message */}
         {isOnVolume && (
-          <div className="mb-6 p-4 bg-green-900/20 border border-green-600 rounded-lg">
-            <p className="text-green-400 text-sm flex items-center">
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-green-700 text-sm flex items-center font-semibold">
               <span className="mr-2">✓</span>
               You're on our highest tier! Enjoy your Volume plan.
             </p>
@@ -293,11 +293,11 @@ const PaymentModalEmbedded = ({
 
         {/* Pending Tier Message */}
         {hasPendingTier && (
-          <div className="mb-6 p-4 bg-blue-900/20 border border-blue-600 rounded-lg">
-            <p className="text-blue-400 text-sm font-semibold">
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-blue-700 text-sm font-semibold">
               ⏳ Pending Upgrade: {pendingTier} Plan
             </p>
-            <p className="text-blue-300 text-xs mt-2">
+            <p className="text-blue-600 text-xs mt-2">
               Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}. You cannot upgrade while a tier change is pending.
             </p>
           </div>
@@ -305,7 +305,7 @@ const PaymentModalEmbedded = ({
 
         {/* Plan Selection */}
         <div className="mb-6">
-          <label className="block text-gray-300 text-sm font-semibold mb-3">
+          <label className="block text-gray-700 text-sm font-semibold mb-3">
             Choose a Plan
           </label>
           <div className="space-y-2">
@@ -317,10 +317,10 @@ const PaymentModalEmbedded = ({
                   key={planName}
                   className={`flex items-start p-3 border rounded-lg transition ${
                     !canPurchase
-                      ? 'border-gray-500 bg-gray-600/50 cursor-not-allowed'
+                      ? 'border-gray-300 bg-gray-50 cursor-not-allowed'
                       : selectedPlan === planName
-                      ? 'border-purple-500 bg-purple-500/10 cursor-pointer'
-                      : 'border-gray-600 hover:border-purple-500 cursor-pointer'
+                      ? 'border-blue-500 bg-blue-50 cursor-pointer'
+                      : 'border-gray-200 hover:border-blue-400 cursor-pointer'
                   }`}
                 >
                   <input
@@ -329,18 +329,18 @@ const PaymentModalEmbedded = ({
                     value={planName}
                     checked={selectedPlan === planName}
                     onChange={(e) => setSelectedPlan(e.target.value)}
-                    className="w-4 h-4 accent-purple-500 mt-1"
+                    className="w-4 h-4 accent-blue-600 mt-1"
                     disabled={getButtonDisabledState(planName)}
                   />
                   <div className="ml-3 flex-1">
-                    <p className={`font-semibold ${!canPurchase ? 'text-gray-400' : 'text-white'}`}>
+                    <p className={`font-semibold ${!canPurchase ? 'text-gray-500' : 'text-gray-900'}`}>
                       {planName} Plan {isCurrentPlan && '(Current)'}
                     </p>
-                    <p className={`text-sm ${!canPurchase ? 'text-gray-500' : 'text-gray-400'}`}>
+                    <p className={`text-sm ${!canPurchase ? 'text-gray-500' : 'text-gray-600'}`}>
                       ${(plan.amount / 100).toFixed(2)}/month • {plan.monthlyLimit} documents/mo
                     </p>
                     {isOnVolume && (
-                      <p className="text-xs text-green-400 mt-1">✓ Highest tier</p>
+                      <p className="text-xs text-blue-600 mt-1 font-semibold">✓ Highest tier</p>
                     )}
                   </div>
                 </label>
@@ -350,23 +350,23 @@ const PaymentModalEmbedded = ({
         </div>
 
         {/* Plan Features */}
-        <div className="mb-6 p-4 bg-blue-600/20 border border-blue-600 rounded-lg">
-          <h4 className="text-white font-semibold text-sm mb-3">Included:</h4>
-          <ul className="space-y-2 text-sm text-gray-300">
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <h4 className="text-gray-900 font-semibold text-sm mb-3">Included:</h4>
+          <ul className="space-y-2 text-sm text-gray-700">
             <li className="flex items-center">
-              <span className="text-purple-400 mr-2">✓</span>
+              <span className="text-blue-600 mr-2 font-bold">✓</span>
               {planDetails.monthlyLimit} documents/month
             </li>
             <li className="flex items-center">
-              <span className="text-purple-400 mr-2">✓</span>
+              <span className="text-blue-600 mr-2 font-bold">✓</span>
               Up to {planDetails.maxPages} pages per document
             </li>
             <li className="flex items-center">
-              <span className="text-purple-400 mr-2">✓</span>
+              <span className="text-blue-600 mr-2 font-bold">✓</span>
               {planDetails.retentionDays} days document retention
             </li>
             <li className="flex items-center">
-              <span className="text-purple-400 mr-2">✓</span>
+              <span className="text-blue-600 mr-2 font-bold">✓</span>
               Priority support
             </li>
           </ul>
@@ -375,22 +375,22 @@ const PaymentModalEmbedded = ({
         {/* Payment Form or Status */}
         {successMessage ? (
           <div className="text-center py-8">
-            <div className="text-green-400 text-4xl mb-4">✓</div>
-            <p className="text-white font-semibold mb-2">Payment Successful!</p>
-            <p className="text-gray-400 text-sm">Your plan has been upgraded and Airtable has been updated.</p>
+            <div className="text-green-600 text-4xl mb-4">✓</div>
+            <p className="text-gray-900 font-semibold mb-2">Payment Successful!</p>
+            <p className="text-gray-600 text-sm">Your plan has been upgraded and Airtable has been updated.</p>
           </div>
         ) : isOnVolume ? (
-          <div className="text-center py-8 bg-green-900/20 border border-green-600 rounded-lg">
-            <div className="text-green-400 text-4xl mb-4">✓</div>
-            <p className="text-white font-semibold mb-2">Maximum Plan Reached</p>
-            <p className="text-gray-400 text-sm">You're already on our highest tier. Enjoy your Volume plan!</p>
+          <div className="text-center py-8 bg-green-50 border border-green-200 rounded-lg">
+            <div className="text-green-600 text-4xl mb-4">✓</div>
+            <p className="text-gray-900 font-semibold mb-2">Maximum Plan Reached</p>
+            <p className="text-gray-600 text-sm">You're already on our highest tier. Enjoy your Volume plan!</p>
           </div>
         ) : hasPendingTier ? (
-          <div className="text-center py-8 bg-blue-900/20 border border-blue-600 rounded-lg">
-            <div className="text-blue-400 text-4xl mb-4">⏳</div>
-            <p className="text-white font-semibold mb-2">Pending Tier Activation</p>
-            <p className="text-gray-400 text-sm mb-3">You have a tier change pending and cannot upgrade while it's active.</p>
-            <p className="text-blue-300 text-xs">
+          <div className="text-center py-8 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-blue-600 text-4xl mb-4">⏳</div>
+            <p className="text-gray-900 font-semibold mb-2">Pending Tier Activation</p>
+            <p className="text-gray-600 text-sm mb-3">You have a tier change pending and cannot upgrade while it's active.</p>
+            <p className="text-blue-600 text-xs font-semibold">
               Your {pendingTier} plan will activate on {new Date(pendingActivationDate).toLocaleDateString()}
             </p>
           </div>
@@ -408,19 +408,19 @@ const PaymentModalEmbedded = ({
             />
           </Elements>
         ) : error ? (
-          <div className="bg-red-900/20 border border-red-600 text-red-400 px-4 py-3 rounded-lg text-sm">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             <p className="font-semibold mb-2">Error</p>
             <p>{error}</p>
             <button
               onClick={createPaymentIntent}
-              className="mt-3 w-full px-3 py-2 bg-red-600 hover:bg-red-700 rounded text-white text-sm font-semibold"
+              className="mt-3 w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-semibold"
             >
               Retry
             </button>
           </div>
         ) : canProceed ? (
           <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-purple-500"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-blue-600"></div>
           </div>
         ) : null}
       </div>

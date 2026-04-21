@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
-
 const PortalLogin = ({ navigate, onLogin }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -20,10 +18,8 @@ const PortalLogin = ({ navigate, onLogin }) => {
             const userCredential = await login(email, password);
             const user = userCredential.user;
 
-            // Optional: Check if email is verified before allowing full access
             if (!user.emailVerified) {
                 setError('Please verify your email address before logging in.');
-                // await logout(); // Optional: force logout if you want strict enforcement
                 return;
             }
             
@@ -42,40 +38,76 @@ const PortalLogin = ({ navigate, onLogin }) => {
     };
 
     return (
-        <section className="max-w-7xl mx-auto px-4 py-40">
-            <h2 className="text-4xl font-extrabold mb-12 text-center">Client Portal Login</h2>
+        <section className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center px-4 py-12">
+            <div className="w-full max-w-md">
+                <div className="text-center mb-8">
+                    <div className="mb-4 inline-block p-3 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg">
+                        <div className="text-white text-2xl font-bold">Nexiom</div>
+                    </div>
+                    <h1 className="text-3xl font-bold text-gray-900 mb-2">Sign in to your account</h1>
+                    <p className="text-gray-600 text-sm">Access your Nexiom AI Solutions portal</p>
+                </div>
 
-            <div className="flex justify-center">
-                <div className="w-full max-w-lg p-10 rounded-2xl shadow-2xl bg-gray-800 border border-purple-700">
-                    <h3 className="text-3xl font-bold mb-4 text-fuchsia-500 text-center">Access Your Solution</h3>
-                    
-                    {error && <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded mb-4 text-center text-sm">{error}</div>}
+                <div className="bg-white border border-blue-200 rounded-lg p-6 sm:p-8 shadow-sm hover:shadow-md transition">
+                    {error && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                            {error}
+                        </div>
+                    )}
                     
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white"/>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">Email address</label>
+                            <input 
+                                id="email"
+                                type="email" 
+                                value={email} 
+                                onChange={(e) => setEmail(e.target.value)} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="name@company.com"
+                            />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-purple-500 focus:ring-fuchsia-500 focus:border-fuchsia-500 text-white"/>
+                            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                            <input 
+                                id="password"
+                                type="password" 
+                                value={password} 
+                                onChange={(e) => setPassword(e.target.value)} 
+                                required 
+                                className="w-full px-4 py-2.5 rounded-lg bg-white border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 text-sm transition"
+                                placeholder="••••••••"
+                            />
                         </div>
-                        <button disabled={loading} type="submit" className={`w-full ${BUTTON_GRADIENT} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                            {loading ? 'Signing In...' : 'Sign In Securely'}
+                        <button 
+                            disabled={loading} 
+                            type="submit" 
+                            className={`w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg transition ${
+                                loading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
+                            }`}
+                        >
+                            {loading ? 'Signing in...' : 'Sign in'}
                         </button>
                         
-                        <div className="flex justify-between items-center text-sm pt-2">
-                            <a href="#" onClick={(e) => { e.preventDefault(); navigate('ForgotPassword'); }} className="text-gray-400 hover:text-purple-400">Forgot Password?</a>
+                        <div className="text-center pt-2">
+                            <a 
+                                href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('ForgotPassword'); }} 
+                                className="text-sm text-blue-600 hover:text-blue-700 font-semibold"
+                            >
+                                Forgot your password?
+                            </a>
                         </div>
                     </form>
 
-                    <div className="mt-8 pt-6 border-t border-gray-700 text-center">
-                        <p className="text-gray-400 text-sm mb-3">Don't have an account?</p>
+                    <div className="mt-6 pt-6 border-t border-blue-100 text-center">
+                        <p className="text-gray-600 text-sm mb-2">Don't have an account?</p>
                         <button 
                             onClick={() => navigate('CreateAccount')}
-                            className="text-fuchsia-400 font-semibold hover:underline"
+                            className="text-blue-600 hover:text-blue-700 font-semibold text-sm"
                         >
-                            Create New Account
+                            Create an account
                         </button>
                     </div>
                 </div>

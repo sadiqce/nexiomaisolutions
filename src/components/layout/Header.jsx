@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-const TITLE_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 bg-clip-text text-transparent";
-const BUTTON_GRADIENT = "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white px-6 py-2 rounded-xl font-medium shadow-lg transition duration-300 ease-in-out hover:opacity-90 hover:shadow-xl";
-
 const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCancelSubscription, onUpgradeClick, paymentRefreshTrigger }) => {
     const isDashboard = currentPage === 'PortalDashboard';
     const [userTier, setUserTier] = useState(null);
@@ -125,68 +122,64 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
     };
 
     return (
-        <header className="sticky top-0 z-50 bg-[#0d0a1b] bg-opacity-95 shadow-lg">
-            <div className="max-w-7xl mx-auto px-4 py-2 flex justify-between items-center">
-                <a href="#" onClick={(e) => { e.preventDefault(); navigate('Home'); }} className="text-3xl font-extrabold tracking-tight">
-                    <span className={TITLE_GRADIENT}>Nexiom</span> AI Solutions
+        <header className="sticky top-0 z-50 bg-white border-b border-gray-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
+                <a href="#" onClick={(e) => { e.preventDefault(); navigate('Home'); }} className="flex items-center gap-2">
+                    <span className="text-lg font-semibold text-gray-900">Nexiom AI Solutions</span>
                 </a>
 
-                <div className="flex space-x-4 items-center">
+                <nav className="hidden md:flex items-center gap-6">
                     <a href="#" 
                         onClick={(e) => { e.preventDefault(); navigate('Pricing'); }} 
-                        className="text-white px-4 py-2 rounded-xl font-medium transition duration-300 ease-in-out hover:text-fuchsia-500 hover:bg-gray-800"
+                        className="text-sm text-gray-600 hover:text-gray-900 transition"
                     >
                         Pricing
                     </a>
                     <a href="#" 
                         onClick={(e) => { e.preventDefault(); navigate('TermsOfUse'); }} 
-                        className="text-white px-4 py-2 rounded-xl font-medium transition duration-300 ease-in-out hover:text-fuchsia-500 hover:bg-gray-800"
+                        className="text-sm text-gray-600 hover:text-gray-900 transition"
                     >
                         Terms & Limits
                     </a>
+                </nav>
+
+                <div className="flex items-center gap-3 sm:gap-4">
                     {isDashboard ? (
                         <>
-                            {/* Current Plan Display with Details */}
+                            {/* Current Plan Display */}
                             <div className="group relative">
-                                <div className="flex items-center px-4 py-2 bg-gray-700/50 rounded-xl cursor-pointer hover:bg-gray-700 transition">
-                                    <div>
-                                        <p className="text-xs text-gray-400">Current Plan</p>
-                                        <p className="text-sm font-semibold text-purple-400">{userTier || 'Loading...'}</p>
-                                        {daysUntilPlanChange !== null && daysUntilPlanChange > 0 && (
-                                            <p className="text-xs text-green-400 mt-1">
-                                                {pendingPlan?.plan} starts in {daysUntilPlanChange} day{daysUntilPlanChange !== 1 ? 's' : ''}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
+                                <button className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 transition text-sm">
+                                    <span className="text-gray-600">Plan:</span>
+                                    <span className="font-semibold text-blue-600">{userTier || 'Loading'}</span>
+                                </button>
                                 
                                 {/* Dropdown Menu */}
-                                <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                                    <div className="p-4 border-b border-gray-700">
-                                        <h3 className="text-white font-semibold mb-3">{userTier || 'Sandbox'} Plan</h3>
+                                <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                                    <div className="p-4 border-b border-gray-200">
+                                        <h3 className="font-semibold text-gray-900 mb-3 text-sm">{userTier || 'Sandbox'} Plan</h3>
                                         {getPlanDetails() && (
-                                            <div className="space-y-2 text-xs text-gray-300">
+                                            <div className="space-y-2 text-xs text-gray-600">
                                                 <div className="flex items-start">
-                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span className="text-blue-600 mr-2 flex-shrink-0">✓</span>
                                                     <span>{getPlanDetails().limit}</span>
                                                 </div>
                                                 <div className="flex items-start">
-                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span className="text-blue-600 mr-2 flex-shrink-0">✓</span>
                                                     <span>Max file size: {getPlanDetails().maxFileSize}</span>
                                                 </div>
                                                 <div className="flex items-start">
-                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span className="text-blue-600 mr-2 flex-shrink-0">✓</span>
                                                     <span>Max {getPlanDetails().maxPages} per document</span>
                                                 </div>
                                                 <div className="flex items-start">
-                                                    <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                    <span className="text-blue-600 mr-2 flex-shrink-0">✓</span>
                                                     <span>{getPlanDetails().retention} file retention</span>
                                                 </div>
                                                 {getPlanDetails().features && getPlanDetails().features.length > 0 && (
-                                                    <div className="pt-2 border-t border-gray-700">
+                                                    <div className="pt-2 border-t border-gray-200">
                                                         {getPlanDetails().features.map((feature, idx) => (
                                                             <div key={idx} className="flex items-start mt-2">
-                                                                <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                                                                <span className="text-blue-600 mr-2 flex-shrink-0">✓</span>
                                                                 <span>{feature}</span>
                                                             </div>
                                                         ))}
@@ -196,25 +189,25 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                                         )}
                                     </div>
                                     {userTier !== 'Volume' && (
-                                        <div className="p-3 border-t border-gray-700">
+                                        <div className="p-3 border-t border-gray-200">
                                             <button 
                                                 onClick={() => onUpgradeClick && onUpgradeClick()}
-                                                className="w-full px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded transition"
+                                                className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition"
                                             >
                                                 Upgrade Plan
                                             </button>
                                         </div>
                                     )}
                                     {userTier === 'Volume' && (
-                                        <div className="p-3 border-t border-gray-700">
-                                            <p className="text-xs text-green-400 text-center">✓ Highest tier</p>
+                                        <div className="p-3 border-t border-gray-200">
+                                            <p className="text-xs text-gray-600 text-center">✓ Highest tier</p>
                                         </div>
                                     )}
                                     {subscriptionStatus === 'active' && userTier !== 'Sandbox' && (
-                                        <div className="p-3 border-t border-gray-700">
+                                        <div className="p-3 border-t border-gray-200">
                                             <button 
                                                 onClick={() => setShowCancelConfirm(true)}
-                                                className="w-full px-3 py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 text-sm font-semibold rounded transition"
+                                                className="w-full px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded transition"
                                             >
                                                 Cancel Subscription
                                             </button>
@@ -224,14 +217,14 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
 
                                 {/* Cancel Confirmation Modal */}
                                 {showCancelConfirm && (
-                                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                                        <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md">
-                                            <h3 className="text-white font-semibold mb-2">Cancel Subscription</h3>
-                                            <p className="text-gray-300 text-sm mb-4">
+                                    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+                                        <div className="bg-white rounded-lg p-6 max-w-md shadow-lg">
+                                            <h3 className="font-semibold text-gray-900 mb-2">Cancel Subscription</h3>
+                                            <p className="text-gray-600 text-sm mb-4">
                                                 Are you sure you want to cancel your {userTier} subscription? You'll be downgraded to the Sandbox plan.
                                             </p>
                                             {cancelError && (
-                                                <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-400 text-sm">
+                                                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-600 text-xs">
                                                     {cancelError}
                                                 </div>
                                             )}
@@ -242,16 +235,16 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                                                         setCancelError(null);
                                                     }}
                                                     disabled={isCanceling}
-                                                    className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition disabled:opacity-50"
+                                                    className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded text-sm font-medium transition disabled:opacity-50"
                                                 >
                                                     Keep Subscription
                                                 </button>
                                                 <button
                                                     onClick={handleCancelClick}
                                                     disabled={isCanceling}
-                                                    className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition disabled:opacity-50"
+                                                    className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium transition disabled:opacity-50"
                                                 >
-                                                    {isCanceling ? 'Canceling...' : 'Cancel Subscription'}
+                                                    {isCanceling ? 'Canceling...' : 'Cancel'}
                                                 </button>
                                             </div>
                                         </div>
@@ -260,26 +253,26 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                             </div>
                             <button 
                                 onClick={signOut}
-                                className="border border-red-500 text-red-400 px-4 py-2 rounded-xl font-medium transition duration-300 hover:bg-red-900/30 hover:shadow-md"
+                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition"
                             >
                                 Sign Out
                             </button>
                         </>
                     ) : (
-                        <a href="#" 
-                            onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} 
-                            className="text-white px-4 py-2 rounded-xl font-medium transition duration-300 ease-in-out hover:text-fuchsia-500 hover:bg-gray-800 flex items-center"
-                        >
-                            Client Portal
-                        </a>
-                    )}
-                    {!isDashboard && (
-                        <button 
-                            onClick={() => currentPage === 'Home' ? document.getElementById('contact-form-section')?.scrollIntoView({ behavior: 'smooth' }) : navigate('Home')}
-                            className={BUTTON_GRADIENT}
-                        >
-                            Get in Touch
-                        </button>
+                        <>
+                            <a href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} 
+                                className="text-sm text-gray-600 hover:text-gray-900 transition"
+                            >
+                                Portal
+                            </a>
+                            <button 
+                                onClick={() => currentPage === 'Home' ? document.getElementById('contact-form-section')?.scrollIntoView({ behavior: 'smooth' }) : navigate('Home')}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition"
+                            >
+                                Get Started
+                            </button>
+                        </>
                     )}
                 </div>
             </div>
