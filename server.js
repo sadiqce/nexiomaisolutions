@@ -385,6 +385,8 @@ app.post('/api/create-subscription', async (req, res) => {
         userId,
         planTier,
         clientId: clientId || '',
+        // If deferred, mark this subscription as pending
+        ...(isDeferred && activationDate && { pendingTier: planTier, activationDate: activationDate }),
       },
       payment_behavior: paymentBehavior,
       payment_settings: {
@@ -729,6 +731,88 @@ app.post('/api/cancel-subscription', async (req, res) => {
     console.error('Error details:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to cancel subscription' 
+    });
+  }
+});
+
+/**
+ * Cancel Pending Subscription
+ * POST /api/cancel-pending-subscription
+ * Cancels a pending (trial) subscription while keeping the current subscription active
+ * Used when user cancels an upgrade before the trial ends
+ */
+app.post('/api/cancel-pending-subscription', async (req, res) => {
+  try {
+    const { userId, userEmail, currentSubscriptionId, pendingTier } = req.body;
+
+    if (!userId || !userEmail || !currentSubscriptionId || !pendingTier) {
+      return res.status(400).json({
+        error: 'Missing required fields: userId, userEmail, currentSubscriptionId, pendingTier',
+      });
+    }
+
+    console.log(`Cancel pending subscription request for user ${userId}: ${pendingTier} plan`);
+
+    // Find the customer in Stripe
+    const customers = await stripe.customers.list({
+      email: userEmail,
+      limit: 1,
+    });
+
+    if (customers.data.length === 0) {
+      return res.status(404).json({ error: 'Customer not found in Stripe' });
+    }
+
+    const customerId = customers.data[0].id;
+    console.log(`Found customer ${customerId} for ${userEmail}`);
+
+    // List all subscriptions for this customer
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      limit: 100,
+    });
+
+    console.log(`Found ${subscriptions.data.length} subscriptions for customer`);
+
+    // Find the pending (trial) subscription
+    // It should be in trial state (trial_end is set and in the future)
+    let pendingSubscription = null;
+    for (const sub of subscriptions.data) {
+      // Skip the current subscription
+      if (sub.id === currentSubscriptionId) {
+        console.log(`Skipping current subscription ${currentSubscriptionId}`);
+        continue;
+      }
+
+      // Check if this is a trial subscription
+      if (sub.trial_end && new Date(sub.trial_end * 1000) > new Date()) {
+        console.log(`Found trial subscription ${sub.id}: status=${sub.status}, trial_end=${new Date(sub.trial_end * 1000).toISOString()}`);
+        pendingSubscription = sub;
+        break;
+      }
+    }
+
+    if (!pendingSubscription) {
+      console.warn(`No pending trial subscription found for customer ${customerId}`);
+      return res.status(404).json({ error: 'Pending subscription not found' });
+    }
+
+    // Cancel the pending subscription immediately
+    console.log(`Cancelling pending subscription ${pendingSubscription.id}`);
+    const cancelledSub = await stripe.subscriptions.del(pendingSubscription.id);
+
+    console.log(`✓ Pending subscription cancelled: ${cancelledSub.id}`);
+
+    res.json({
+      success: true,
+      subscriptionId: cancelledSub.id,
+      status: cancelledSub.status,
+      message: `Pending ${pendingTier} upgrade has been cancelled`,
+    });
+  } catch (error) {
+    console.error('Error cancelling pending subscription:', error.message);
+    res.status(500).json({
+      error: error.message || 'Failed to cancel pending subscription',
     });
   }
 });

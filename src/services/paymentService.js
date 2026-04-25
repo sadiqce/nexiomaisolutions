@@ -538,27 +538,25 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
       const billingEndDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
       
       console.log(`✓ Paid user upgrading from ${currentTier} to ${planTier}. Deferring to ${billingEndDate.toISOString()}`);
+      console.log(`Current subscription ID: ${user?.StripeSubscriptionId}`);
+      console.log(`Pending subscription ID: ${subscriptionId}`);
       
-      // Cancel the old Stripe subscription if it exists
-      if (user?.StripeSubscriptionId) {
-        try {
-          console.log(`Cancelling old Stripe subscription ${user.StripeSubscriptionId}`);
-          await cancelStripeSubscription(user.StripeSubscriptionId);
-          console.log(`✓ Cancelled old Stripe subscription`);
-        } catch (cancelError) {
-          console.error(`⚠ Failed to cancel old subscription: ${cancelError.message}`);
-          // Continue anyway - we'll still schedule the new plan
-        }
-      }
+      // Do NOT cancel the old Stripe subscription yet
+      // Keep it active so user continues with current plan during trial period
+      // Do NOT overwrite StripeSubscriptionId - keep the current subscription ID
+      // Store pending subscription metadata on the backend side
+      console.log(`✓ Keeping both subscriptions - current active, pending in trial until activation`);
 
       // Prepare subscription data for the PENDING (future) tier
+      // NOTE: We do NOT update stripeSubscriptionId here - we keep the current active subscription ID
+      // The backend will track which subscription is which via Stripe's metadata
       const subscriptionData = {
         autoRenewal: true,
         subscriptionStatus: 'active', // Current status stays active
         pendingTier: planTier,
         pendingActivationDate: billingEndDate.toISOString(),
-        stripeSubscriptionId: subscriptionId,
         stripeSubscriptionStatus: subscriptionStatus || 'active',
+        // stripeSubscriptionId remains unchanged (still points to current active subscription)
       };
 
       await updateUserSubscription(userId, subscriptionData);
@@ -592,19 +590,45 @@ export const activateScheduledPlan = async (userId, user) => {
     return null;
   }
 
-  // Move pending tier to active tier
-  const subscriptionData = {
-    subscriptionTier: user.PendingTier,
-    lastPaymentDate: now.toISOString(),
-    subscriptionEndDate: addDays(now, 30).toISOString(),
-    autoRenewal: true,
-    pendingTier: null,
-    pendingActivationDate: null,
-    // Note: stripeSubscriptionId should already be set from when the pending tier was purchased
-  };
-
   console.log(`✓ Activating scheduled plan for user ${userId}: ${user.PendingTier}`);
-  return await updateUserSubscription(userId, subscriptionData);
+
+  try {
+    // Cancel the old subscription (current active plan) if it still exists
+    // The trial subscription should be transitioning to active automatically
+    if (user.StripeSubscriptionId) {
+      try {
+        console.log(`Attempting to cancel old subscription ${user.StripeSubscriptionId} at activation`);
+        await cancelStripeSubscription(user.StripeSubscriptionId);
+        console.log(`✓ Cancelled old subscription at activation`);
+      } catch (cancelError) {
+        console.warn(`⚠ Warning: Could not cancel old subscription: ${cancelError.message}`);
+        // Continue anyway - the important thing is updating Airtable
+      }
+    }
+
+    // Call backend to find the trial subscription and mark it as the new active subscription in Airtable
+    // Note: Stripe automatically transitions the trial subscription to 'active' when trial_end is reached
+    const { getUser: getUpdatedUser } = await import('./airtableService');
+    const updatedUser = await getUpdatedUser(userId);
+
+    // Move pending tier to active tier
+    const subscriptionData = {
+      subscriptionTier: user.PendingTier,
+      lastPaymentDate: now.toISOString(),
+      subscriptionEndDate: addDays(now, 30).toISOString(),
+      autoRenewal: true,
+      pendingTier: null,
+      pendingActivationDate: null,
+      // stripeSubscriptionId remains the same - Stripe auto-activated the trial subscription
+      // so it's now the active subscription for this customer
+    };
+
+    console.log(`Updating Airtable to activate ${user.PendingTier} plan`);
+    return await updateUserSubscription(userId, subscriptionData);
+  } catch (error) {
+    console.error(`Error activating scheduled plan for user ${userId}:`, error);
+    throw error;
+  }
 };
 
 /**
@@ -658,8 +682,11 @@ export const getUserPaymentStatus = async (userId) => {
 
 /**
  * Cancel a user's subscription
- * Cancels Stripe subscription FIRST, then updates Airtable.
- * If Stripe cancellation fails after retries, Airtable is NOT updated.
+ * Handles three cases:
+ * 1. Pending upgrade (trial): Cancel the pending subscription, keep current tier active
+ * 2. Active subscription: Cancel it and move user to Sandbox
+ * 3. No active subscription: Return error
+ * 
  * @param {string} userId - User ID
  * @returns {Promise<object>} Cancellation result
  */
@@ -677,8 +704,62 @@ export const cancelSubscription = async (userId) => {
       throw new Error('User not found');
     }
 
-    console.log(`User tier: ${user.Tier}, subscription status: ${user.SubscriptionStatus}, stripe ID: ${user.StripeSubscriptionId}`);
+    console.log(`User tier: ${user.Tier}, subscription status: ${user.SubscriptionStatus}, pending tier: ${user.PendingTier}`);
 
+    // Check if user has a PENDING upgrade (trial subscription)
+    const hasPendingUpgrade = !!user.PendingTier && !!user.PendingActivationDate;
+    
+    if (hasPendingUpgrade) {
+      // Case 1: Cancel pending upgrade - keep current subscription active
+      console.log(`✓ User has pending upgrade to ${user.PendingTier}. Cancelling pending subscription only.`);
+      
+      if (!user.StripeSubscriptionId) {
+        console.error(`User has pending tier but no current StripeSubscriptionId`);
+        throw new Error('Current subscription not found');
+      }
+
+      // Call backend to find and cancel the pending subscription (the trial one)
+      // The backend will look for subscriptions associated with this customer and pending tier
+      const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/cancel-pending-subscription`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          userEmail: user.Email,
+          currentSubscriptionId: user.StripeSubscriptionId,
+          pendingTier: user.PendingTier,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to cancel pending subscription');
+      }
+
+      const cancelResult = await response.json();
+      console.log(`✓ Successfully cancelled pending subscription: ${cancelResult.status}`);
+
+      // Update Airtable: Clear pending tier, keep current tier and subscription active
+      const subscriptionData = {
+        pendingTier: null,
+        pendingActivationDate: null,
+        stripeSubscriptionStatus: cancelResult.status,
+        // Keep current subscription status as 'active'
+      };
+
+      console.log(`Updating Airtable to clear pending upgrade for user ${userId}`);
+      await updateUserSubscription(userId, subscriptionData);
+      console.log(`✓ Updated Airtable with cleared pending tier`);
+
+      return {
+        success: true,
+        message: `Your upgrade to ${user.PendingTier} has been cancelled. Your ${user.Tier} plan remains active.`,
+      };
+    }
+
+    // Case 2: Cancel active subscription (no pending upgrade)
     if (!user.SubscriptionStatus || user.SubscriptionStatus !== 'active') {
       console.error(`User ${userId} does not have active subscription. Current status: ${user.SubscriptionStatus}`);
       throw new Error('User does not have an active subscription');
@@ -689,8 +770,8 @@ export const cancelSubscription = async (userId) => {
       throw new Error('No Stripe subscription found for this user');
     }
 
-    // Cancel Stripe subscription FIRST with retry logic
-    console.log(`Cancelling Stripe subscription ${user.StripeSubscriptionId} for user ${userId}`);
+    // Cancel active Stripe subscription FIRST with retry logic
+    console.log(`Cancelling active Stripe subscription ${user.StripeSubscriptionId} for user ${userId}`);
     const cancelResult = await cancelStripeSubscription(user.StripeSubscriptionId);
     console.log(`✓ Successfully cancelled Stripe subscription ${user.StripeSubscriptionId}: ${cancelResult.status}`);
 
@@ -698,8 +779,11 @@ export const cancelSubscription = async (userId) => {
     const billingEndDate = getBillingEndDate(user.LastPaymentDate, user.SubscriptionEndDate);
     const subscriptionData = {
       subscriptionStatus: 'inactive',
+      subscriptionTier: 'Sandbox', // Move to Sandbox
       autoRenewal: false,
       stripeSubscriptionStatus: cancelResult.status,
+      pendingTier: null,
+      pendingActivationDate: null,
     };
 
     if (billingEndDate) {
@@ -710,9 +794,9 @@ export const cancelSubscription = async (userId) => {
     await updateUserSubscription(userId, subscriptionData);
     console.log(`✓ Updated Airtable with cancellation status for user ${userId}`);
 
-    return { 
-      success: true, 
-      message: 'Your subscription has been cancelled. Your plan remains active until the end of your billing period.' 
+    return {
+      success: true,
+      message: 'Your subscription has been cancelled. Your plan remains active until the end of your billing period.',
     };
   } catch (error) {
     console.error('Error cancelling subscription:', error.message);
