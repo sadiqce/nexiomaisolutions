@@ -102,13 +102,17 @@ const retryWithBackoff = async (fn, maxRetries = 3, delayMs = 1000) => {
  * @param {string} userId - User ID (client ID)
  * @param {string} stripePriceId - Stripe price ID for the plan
  * @param {string} paymentMethodId - Payment method ID (optional, from confirmed payment intent)
+ * @param {Date} activationDate - For deferred billing, when to activate the subscription (optional)
  * @returns {Promise<object>} Subscription details with client secret if needed
  */
-export const createStripeSubscription = async (planTier, userEmail, userId, stripePriceId, paymentMethodId = null) => {
+export const createStripeSubscription = async (planTier, userEmail, userId, stripePriceId, paymentMethodId = null, activationDate = null) => {
   return retryWithBackoff(async () => {
     if (!userId || !userEmail || !stripePriceId) {
       throw new Error('User ID, email, and Stripe price ID are required');
     }
+
+    const isDeferred = activationDate !== null;
+    const activationDateString = activationDate ? new Date(activationDate).toISOString() : null;
 
     // Call backend to create subscription
     const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-subscription`, {
@@ -123,6 +127,8 @@ export const createStripeSubscription = async (planTier, userEmail, userId, stri
         priceId: stripePriceId,
         clientId: userId, // Pass client ID for metadata
         paymentMethodId, // Pass payment method from confirmed payment intent
+        activationDate: activationDateString, // For deferred billing
+        isDeferred, // Flag to enable deferred billing
       }),
     });
 
@@ -303,6 +309,9 @@ export const TOPUP_PACKS = {
  * This creates the subscription first and returns its payment intent's client secret
  * The frontend uses this client_secret with stripe.confirmPayment()
  * 
+ * For PAID users upgrading: Uses deferred billing (charges at end of current billing cycle)
+ * For FREE users upgrading: Charges immediately
+ * 
  * @param {string} planTier - Plan tier (Standard, Volume)
  * @param {string} userEmail - User email
  * @param {string} userId - User ID
@@ -323,6 +332,26 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
 
     console.log(`Creating subscription for ${planTier} plan (userId: ${userId})`);
 
+    // Determine if this should be deferred billing
+    // Get current user tier to check if they're a paid user
+    let isDeferred = false;
+    let activationDate = null;
+    
+    try {
+      const user = await getUser(userId);
+      const currentTier = user?.Tier || 'Sandbox';
+      const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
+      
+      if (isUpgradingFromPaid) {
+        // Calculate billing end date
+        activationDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
+        isDeferred = true;
+        console.log(`✓ Deferred billing detected. Subscription will charge on ${activationDate.toISOString()}`);
+      }
+    } catch (userFetchError) {
+      console.warn(`⚠ Could not fetch user tier, proceeding without deferred billing: ${userFetchError.message}`);
+    }
+
     // Call backend to create subscription
     // Backend will return the subscription with its payment_intent's client_secret
     const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-subscription`, {
@@ -336,6 +365,8 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
         planTier,
         priceId: plan.stripePriceId,
         clientId: userId,
+        activationDate: activationDate ? activationDate.toISOString() : null,
+        isDeferred,
       }),
     });
 
@@ -346,9 +377,14 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
 
     const result = await response.json();
     console.log(`✓ Subscription created: ${result.subscriptionId}`);
-    console.log(`✓ Client secret ready for payment confirmation`);
     
-    return result; // Contains: clientSecret, subscriptionId, status, etc.
+    if (isDeferred) {
+      console.log(`✓ Deferred subscription: No immediate payment required. Charges on ${activationDate?.toLocaleDateString()}`);
+    } else {
+      console.log(`✓ Client secret ready for payment confirmation`);
+    }
+    
+    return result; // Contains: clientSecret (if immediate), subscriptionId, status, isDeferred, etc.
   } catch (error) {
     console.error('Error preparing payment:', error);
     throw error;

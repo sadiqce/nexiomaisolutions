@@ -311,10 +311,14 @@ app.post('/api/create-payment-link', async (req, res) => {
  * The subscription's FIRST INVOICE already has a payment_intent attached.
  * Frontend uses this payment_intent's client_secret to collect payment.
  * When payment succeeds, subscription automatically becomes 'active'.
+ * 
+ * For DEFERRED BILLING (paid user upgrading):
+ * Pass activationDate and use billing_cycle_anchor to defer charging
+ * until the end of the current billing cycle.
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
-    const { userId, userEmail, planTier, priceId, clientId, paymentMethodId } = req.body;
+    const { userId, userEmail, planTier, priceId, clientId, paymentMethodId, activationDate, isDeferred } = req.body;
 
     // Validate required fields
     if (!userId || !userEmail || !planTier || !priceId) {
@@ -369,7 +373,8 @@ app.post('/api/create-subscription', async (req, res) => {
     // Use 'error_if_incomplete' if we have a payment method, otherwise 'default_incomplete'
     const paymentBehavior = paymentMethodId ? 'error_if_incomplete' : 'default_incomplete';
     
-    const subscription = await stripe.subscriptions.create({
+    // Build subscription config
+    const subscriptionConfig = {
       customer: customerId,
       items: [
         {
@@ -386,64 +391,98 @@ app.post('/api/create-subscription', async (req, res) => {
         save_default_payment_method: 'on_subscription',
       },
       expand: ['latest_invoice.payment_intent'],
-    });
+    };
 
-    // Get the payment intent from the subscription's invoice
-    // With default_incomplete, this might be null initially, so we may need to refetch
-    let paymentIntent = subscription.latest_invoice?.payment_intent;
-    
-    // If payment intent is not in the expanded response, try to retrieve it
-    if (!paymentIntent && subscription.latest_invoice) {
-      const invoice = await stripe.invoices.retrieve(subscription.latest_invoice.id);
-      paymentIntent = invoice.payment_intent;
-      if (typeof paymentIntent === 'string') {
-        // If it's just the ID string, retrieve the full payment intent object
-        paymentIntent = await stripe.paymentIntents.retrieve(paymentIntent);
-      }
+    // For deferred billing (paid user upgrading to another paid plan):
+    // Use trial_end to delay the first charge without prorating
+    // This charges the FULL monthly amount after the trial period ends
+    if (isDeferred && activationDate) {
+      const trialEndDate = new Date(activationDate);
+      const trialEndTimestamp = Math.floor(trialEndDate.getTime() / 1000);
+      subscriptionConfig.trial_end = trialEndTimestamp;
+      console.log(`✓ Deferred billing enabled (trial). First charge on: ${activationDate} for FULL monthly amount`);
     }
     
-    // FALLBACK: If still no payment intent, create a standalone one for this amount
-    // This ensures frontend always has a client_secret to use for payment
-    if (!paymentIntent || !paymentIntent.client_secret) {
-      console.warn(`⚠ Payment intent not found on subscription, creating standalone payment intent as fallback`);
+    const subscription = await stripe.subscriptions.create(subscriptionConfig);
+
+    // Get the payment intent from the subscription's invoice
+    // For deferred billing, there will be NO invoice/payment intent yet (scheduled for future)
+    let paymentIntent = null;
+    
+    if (!isDeferred || !activationDate) {
+      // Normal billing: Try to get payment intent for immediate charging
+      paymentIntent = subscription.latest_invoice?.payment_intent;
       
-      // Get the price details to determine the amount
-      const price = await stripe.prices.retrieve(priceId);
-      const amount = price.unit_amount || 0;
-      
-      if (!amount) {
-        throw new Error('Could not determine price amount for fallback payment intent');
+      // If payment intent is not in the expanded response, try to retrieve it
+      if (!paymentIntent && subscription.latest_invoice) {
+        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice.id);
+        paymentIntent = invoice.payment_intent;
+        if (typeof paymentIntent === 'string') {
+          // If it's just the ID string, retrieve the full payment intent object
+          paymentIntent = await stripe.paymentIntents.retrieve(paymentIntent);
+        }
       }
+      
+      // FALLBACK: If still no payment intent, create a standalone one for this amount
+      // This ensures frontend always has a client_secret to use for payment
+      if (!paymentIntent || !paymentIntent.client_secret) {
+        console.warn(`⚠ Payment intent not found on subscription, creating standalone payment intent as fallback`);
+        
+        // Get the price details to determine the amount
+        const price = await stripe.prices.retrieve(priceId);
+        const amount = price.unit_amount || 0;
+        
+        if (!amount) {
+          throw new Error('Could not determine price amount for fallback payment intent');
+        }
 
-      paymentIntent = await stripe.paymentIntents.create({
-        amount: amount,
-        currency: price.currency,
-        customer: customerId,
-        description: `Subscription payment for ${planTier} plan`,
-        metadata: {
-          userId,
-          planTier,
-          subscriptionId: subscription.id,
-          subscriptionPayment: 'true',
-        },
-        setup_future_usage: 'off_session', // Save payment method for future charges
-      });
+        paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: price.currency,
+          customer: customerId,
+          description: `Subscription payment for ${planTier} plan`,
+          metadata: {
+            userId,
+            planTier,
+            subscriptionId: subscription.id,
+            subscriptionPayment: 'true',
+          },
+          setup_future_usage: 'off_session', // Save payment method for future charges
+        });
 
-      console.log(`✓ Created fallback payment intent ${paymentIntent.id}`);
+        console.log(`✓ Created fallback payment intent ${paymentIntent.id}`);
+      }
+    } else {
+      console.log(`✓ Deferred billing: No immediate payment required. First invoice scheduled for ${activationDate}`);
     }
 
     console.log(`✓ Created subscription ${subscription.id}`);
     console.log(`✓ Subscription status: ${subscription.status}`);
-    console.log(`✓ Payment intent status: ${paymentIntent.status}`);
-    console.log(`✓ Returning client_secret for frontend payment confirmation`);
-
-    res.json({
-      subscriptionId: subscription.id,
-      clientSecret: paymentIntent.client_secret,
-      paymentIntentId: paymentIntent.id,
-      status: subscription.status,
-      customerId,
-    });
+    
+    // For deferred billing, no payment is collected now
+    // For immediate billing, return client_secret for payment confirmation
+    if (isDeferred && activationDate) {
+      console.log(`✓ Deferred subscription created. No immediate payment needed.`);
+      res.json({
+        subscriptionId: subscription.id,
+        status: subscription.status,
+        customerId,
+        isDeferred: true,
+        activationDate: activationDate,
+        message: `Subscription scheduled to start on ${activationDate}. No payment required now.`,
+      });
+    } else {
+      console.log(`✓ Payment intent status: ${paymentIntent?.status}`);
+      console.log(`✓ Returning client_secret for frontend payment confirmation`);
+      res.json({
+        subscriptionId: subscription.id,
+        clientSecret: paymentIntent?.client_secret,
+        paymentIntentId: paymentIntent?.id,
+        status: subscription.status,
+        customerId,
+        isDeferred: false,
+      });
+    }
   } catch (error) {
     console.error('Error creating subscription:', error);
     res.status(500).json({ 

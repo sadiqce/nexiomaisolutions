@@ -167,6 +167,8 @@ const PaymentModalEmbedded = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isDeferred, setIsDeferred] = useState(false);
+  const [deferredActivationDate, setDeferredActivationDate] = useState(null);
 
   // Check if user has a pending tier
   const hasPendingTier = !!pendingTier;
@@ -198,6 +200,8 @@ const PaymentModalEmbedded = ({
       setError('');
       setClientSecret('');
       setSubscriptionId('');
+      setIsDeferred(false);
+      setDeferredActivationDate(null);
     }
   }, [isOpen, targetPlan]);
 
@@ -232,13 +236,34 @@ const PaymentModalEmbedded = ({
         m.createPaymentIntentForPlan(selectedPlan, userEmail, userId)
       );
 
-      setClientSecret(paymentData.clientSecret);
+      setClientSecret(paymentData.clientSecret || '');
       setSubscriptionId(paymentData.subscriptionId || '');
+      setIsDeferred(paymentData.isDeferred || false);
+      setDeferredActivationDate(paymentData.activationDate || null);
     } catch (err) {
       setError(err.message || 'Failed to initialize payment');
       console.error('Payment intent error:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeferredPaymentSuccess = async (paymentData) => {
+    try {
+      // For deferred billing, still need to call processPaymentSuccess to update Airtable
+      const { processPaymentSuccess } = await import('../../services/paymentService');
+      const result = await processPaymentSuccess(
+        userId,
+        selectedPlan,
+        paymentData.subscriptionId,
+        'active',
+        null, // No payment intent for deferred
+        null  // No payment method needed for deferred
+      );
+      handlePaymentSuccess(result);
+    } catch (err) {
+      setError(err.message || 'Failed to process subscription');
+      console.error('Deferred payment error:', err);
     }
   };
 
@@ -377,7 +402,43 @@ const PaymentModalEmbedded = ({
           <div className="text-center py-8">
             <div className="text-green-600 text-4xl mb-4">✓</div>
             <p className="text-gray-900 font-semibold mb-2">Payment Successful!</p>
-            <p className="text-gray-600 text-sm">Your plan has been upgraded and Airtable has been updated.</p>
+            <p className="text-gray-600 text-sm">
+              {isDeferred 
+                ? `Your ${selectedPlan} plan has been scheduled. It will activate on ${new Date(deferredActivationDate).toLocaleDateString()}.`
+                : 'Your plan has been upgraded and Airtable has been updated.'
+              }
+            </p>
+          </div>
+        ) : isDeferred && !isOnVolume && !hasPendingTier ? (
+          <div>
+            <div className="text-center py-8 bg-amber-50 border border-amber-200 rounded-lg mb-6">
+              <div className="text-amber-600 text-4xl mb-4">⏳</div>
+              <p className="text-gray-900 font-semibold mb-2">Deferred Activation</p>
+              <p className="text-gray-600 text-sm mb-3">
+                Your {selectedPlan} plan will activate on <strong>{new Date(deferredActivationDate).toLocaleDateString()}</strong>
+              </p>
+              <p className="text-amber-600 text-xs mb-3">
+                No payment is required now. You will be charged on the activation date.
+              </p>
+              <p className="text-gray-600 text-sm">
+                Your current plan remains active until then.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => onClose(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-gray-900 hover:bg-gray-50 transition font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeferredPaymentSuccess({ subscriptionId, isDeferred })}
+                disabled={loading}
+                className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white font-semibold transition"
+              >
+                {loading ? 'Processing...' : 'Confirm Schedule'}
+              </button>
+            </div>
           </div>
         ) : isOnVolume ? (
           <div className="text-center py-8 bg-green-50 border border-green-200 rounded-lg">
