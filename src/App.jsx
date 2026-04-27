@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Header from './components/layout/Header';
-import { getUser } from './services/airtableService';
+import { getUser } from './services/apiClient';
 import { cancelSubscription } from './services/paymentService';
 import HomeView from './views/HomeView';
 import PortalLogin from './views/PortalLogin';

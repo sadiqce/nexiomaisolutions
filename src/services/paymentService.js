@@ -2,7 +2,7 @@
 // Uses Stripe Payment Element for embedded checkout (no page redirect)
 // Requires backend server to create payment intents
 
-import { getUser, updateUserSubscription } from './airtableService';
+import { getUser, updateUserSubscription } from './apiClient';
 import { loadStripe } from '@stripe/stripe-js';
 
 // Get Stripe configuration from environment

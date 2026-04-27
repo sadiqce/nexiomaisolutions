@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { submitContactForm } from '../../services/airtableService';
+import { submitContactForm } from '../../services/apiClient';
 
 const ContactFormSection = () => {
     const [loading, setLoading] = useState(false);

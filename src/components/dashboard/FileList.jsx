@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatFileSize } from '../../utils/formatters';
-import { getDownloadUrl } from '../../services/s3Service';
+import { getDownloadUrl } from '../../services/apiClient';
 
 const FileList = ({ files }) => {
     

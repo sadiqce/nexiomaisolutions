@@ -1,12 +1,14 @@
-// Backend server for Stripe payment processing
-// Handles creating payment intents and processing webhook events
-// Install: npm install express cors dotenv stripe
+// Backend server for Stripe payments + Airtable + S3 operations
+// Handles payment intents, user management, file operations
+// Install: npm install express cors dotenv stripe @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 // Run: node server.js
 
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 dotenv.config();
 
@@ -20,6 +22,22 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// AWS S3 Configuration
+const S3_CONFIG = {
+  bucketName: 'certificate-bot-vault-v1',
+  region: 'us-east-2',
+  accessKeyId: process.env.VITE_AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.VITE_AWS_SECRET_ACCESS_KEY,
+};
+
+const s3Client = new S3Client({
+  region: S3_CONFIG.region,
+  credentials: {
+    accessKeyId: S3_CONFIG.accessKeyId,
+    secretAccessKey: S3_CONFIG.secretAccessKey,
+  },
+});
 
 // ===== AIRTABLE HELPER FUNCTIONS (Server-side) =====
 // These use process.env instead of import.meta.env
@@ -156,6 +174,446 @@ const updateServerUserSubscription = async (userId, subscriptionData) => {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+// ===== AIRTABLE ENDPOINTS =====
+
+/**
+ * GET /api/user/:uid - Get user from Airtable
+ */
+app.get('/api/user/:uid', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    
+    const formula = `({UserID} = '${uid}')`;
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
+
+    const response = await fetch(url, { headers: getAirtableHeaders() });
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to get user' });
+    }
+    
+    if (data.records.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(data.records[0].fields);
+  } catch (error) {
+    console.error('Error getting user:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/user - Create new user in Airtable
+ */
+app.post('/api/user', async (req, res) => {
+  try {
+    const { username, email, uid } = req.body;
+    
+    if (!uid || !email) {
+      return res.status(400).json({ error: 'Missing required fields: uid, email' });
+    }
+
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}`;
+    
+    const record = {
+      fields: {
+        Username: username,
+        Email: email,
+        UserID: uid,
+        CreatedDate: new Date().toISOString(),
+        Tier: 'Sandbox'
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({ records: [record] })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to create user' });
+    }
+    
+    res.status(201).json(data.records[0].fields);
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/user/:uid/tier - Update user tier
+ */
+app.patch('/api/user/:uid/tier', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { newTier } = req.body;
+    
+    if (!newTier) {
+      return res.status(400).json({ error: 'Missing required field: newTier' });
+    }
+
+    const userRecordId = await getServerUserRecordId(uid);
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}/${userRecordId}`;
+    
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({
+        fields: {
+          'Tier': newTier,
+          'TierUpdatedDate': new Date().toISOString()
+        }
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to update tier' });
+    }
+    
+    res.json(data.fields);
+  } catch (error) {
+    console.error('Error updating tier:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/user/:uid/subscription - Update user subscription
+ */
+app.patch('/api/user/:uid/subscription', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const subscriptionData = req.body;
+    
+    const result = await updateServerUserSubscription(uid, subscriptionData);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating subscription:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/user/:uid/files - Get all files for a user
+ */
+app.get('/api/user/:uid/files', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    
+    // First get the user's Airtable record ID
+    const userRecordId = await getServerUserRecordId(uid);
+    
+    // Filter files by user
+    const formula = `({UserID} = '${userRecordId}')`;
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
+
+    const response = await fetch(url, { headers: getAirtableHeaders() });
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to fetch files' });
+    }
+    
+    const files = data.records.map(record => ({
+      id: record.id,
+      originalName: record.fields['OriginalFileName'],
+      newName: record.fields['NewFileName'],
+      size: record.fields['FileSize'],
+      uploadDate: record.fields['UploadTimestamp'],
+      url: record.fields['DownloadLink'],
+      status: 'Uploaded',
+      pageCount: record.fields['PageCount'] || null
+    }));
+    
+    res.json(files);
+  } catch (error) {
+    console.error('Error fetching files:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/file - Create file record in Airtable (after S3 upload)
+ */
+app.post('/api/file', async (req, res) => {
+  try {
+    const { userId, originalName, newName, size, url, userTier, pageCount } = req.body;
+    
+    if (!userId || !originalName) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const userRecordId = await getServerUserRecordId(userId);
+    const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}`;
+    
+    const record = {
+      fields: {
+        "OriginalFileName": originalName,
+        "NewFileName": newName || originalName,
+        "FileSize": size,
+        "UploadTimestamp": new Date().toISOString(),
+        "DownloadLink": url,
+        "UserID": [userRecordId],
+        "UserTier": userTier || 'Sandbox',
+        "PageCount": pageCount || null,
+        "Status": "Pending"
+      }
+    };
+
+    const response = await fetch(airtableUrl, {
+      method: 'POST',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({ records: [record] })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to create file record' });
+    }
+    
+    res.status(201).json(data.records[0].fields);
+  } catch (error) {
+    console.error('Error creating file record:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/user/:uid/monthly-usage - Get monthly usage stats
+ */
+app.get('/api/user/:uid/monthly-usage', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    
+    const currentDate = new Date();
+    const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    
+    const userRecordId = await getServerUserRecordId(uid);
+    
+    const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString();
+    const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
+    
+    const formula = `AND({UserID} = '${userRecordId}', IS_AFTER({UploadTimestamp}, '${monthStart}'), IS_BEFORE({UploadTimestamp}, '${monthEnd}'))`;
+    
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
+    
+    const response = await fetch(url, { headers: getAirtableHeaders() });
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to get usage' });
+    }
+    
+    res.json({
+      monthKey: currentMonth,
+      filesThisMonth: data.records.length,
+      records: data.records,
+      tierInfo: data.records.length > 0 ? data.records[0].fields.UserTier : null
+    });
+  } catch (error) {
+    console.error('Error getting monthly usage:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/user/:uid/topup-credits - Get user's top-up credits
+ */
+app.get('/api/user/:uid/topup-credits', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const user = await getServerUser(uid);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ credits: user.TopUpCredits || 0 });
+  } catch (error) {
+    console.error('Error getting top-up credits:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/user/:uid/topup-credits - Update top-up credits
+ */
+app.patch('/api/user/:uid/topup-credits', async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { creditsToAdd } = req.body;
+    
+    if (creditsToAdd === undefined) {
+      return res.status(400).json({ error: 'Missing required field: creditsToAdd' });
+    }
+
+    const user = await getServerUser(uid);
+    const currentCredits = user?.TopUpCredits || 0;
+    const newCredits = Math.max(0, currentCredits + creditsToAdd);
+    
+    const userRecordId = await getServerUserRecordId(uid);
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}/${userRecordId}`;
+    
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({
+        fields: { 'TopUpCredits': newCredits }
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to update credits' });
+    }
+    
+    res.json({ credits: newCredits });
+  } catch (error) {
+    console.error('Error updating credits:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/contact - Submit contact form
+ */
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+    
+    if (!name || !email || !message) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/ContactSubmissions`;
+    
+    const record = {
+      fields: {
+        Name: name,
+        Email: email,
+        Message: message,
+        SubmittedDate: new Date().toISOString(),
+        Status: 'New'
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getAirtableHeaders(),
+      body: JSON.stringify({ records: [record] })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.error?.message || 'Failed to submit form' });
+    }
+    
+    res.status(201).json(data.records[0].fields);
+  } catch (error) {
+    console.error('Error submitting contact form:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== S3 FILE UPLOAD/DOWNLOAD ENDPOINTS =====
+
+/**
+ * POST /api/file/upload-url - Get signed URL for file upload
+ */
+app.post('/api/file/upload-url', async (req, res) => {
+  try {
+    const { userId, fileName } = req.body;
+    
+    if (!userId || !fileName) {
+      return res.status(400).json({ error: 'Missing required fields: userId, fileName' });
+    }
+
+    const fileKey = `clients/${userId}/${fileName}`;
+    
+    const command = new PutObjectCommand({
+      Bucket: S3_CONFIG.bucketName,
+      Key: fileKey,
+      ContentType: 'application/octet-stream',
+    });
+
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    
+    res.json({
+      uploadUrl: signedUrl,
+      fileKey: fileKey,
+      bucket: S3_CONFIG.bucketName,
+    });
+  } catch (error) {
+    console.error('Error generating upload URL:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/file/download-url/:fileKey - Get signed URL for file download
+ */
+app.get('/api/file/download-url/:fileKey', async (req, res) => {
+  try {
+    const { fileKey } = req.params;
+    const decodedKey = decodeURIComponent(fileKey);
+    
+    const command = new GetObjectCommand({
+      Bucket: S3_CONFIG.bucketName,
+      Key: decodedKey,
+    });
+
+    try {
+      const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+      res.json({ url: signedUrl });
+    } catch (error) {
+      console.error(`File not found: ${decodedKey}`);
+      return res.status(404).json({ 
+        error: 'File not found in S3',
+        requestedKey: decodedKey
+      });
+    }
+  } catch (error) {
+    console.error('Error generating download URL:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/file/list - List files in S3 (for debugging)
+ */
+app.post('/api/file/list', async (req, res) => {
+  try {
+    const { prefix = 'clients/' } = req.body;
+    
+    const command = new ListObjectsV2Command({
+      Bucket: S3_CONFIG.bucketName,
+      Prefix: prefix,
+      MaxKeys: 100,
+    });
+
+    const response = await s3Client.send(command);
+    
+    res.json({
+      objects: response.Contents || [],
+      count: response.Contents?.length || 0
+    });
+  } catch (error) {
+    console.error('Error listing S3 objects:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 /**

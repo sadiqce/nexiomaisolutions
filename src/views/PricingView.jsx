@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getUser } from '../services/airtableService';
+import { getUser } from '../services/apiClient';
 import PaymentModalEmbedded from '../components/payment/PaymentModalEmbedded';
 
 const PricingView = () => {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { createAirtableUser, checkUserExists } from '../services/airtableService';
+import { createAirtableUser, checkUserExists } from '../services/apiClient';
 
 const CreateAccount = ({ navigate }) => {
     const [formData, setFormData] = useState({

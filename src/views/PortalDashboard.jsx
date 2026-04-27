@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { uploadFileToS3 } from '../services/s3Service';
-import { fetchUserFiles, createFileRecord, getUser, getTopUpCredits } from '../services/airtableService';
+import { getS3UploadUrl, uploadFileToS3, fetchUserFiles, createFileRecord, getUser, getTopUpCredits } from '../services/apiClient';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
 import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';
 import { validateUpload, checkMonthlyLimit, getTierConfig } from '../services/tierLimitService';
@@ -342,30 +341,41 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
             // Add to UI immediately
             setUploadedFiles(prev => [tempFile, ...prev]);
 
-            // B. Upload to S3
-            const uploadResult = await uploadFileToS3(file, currentUser);
+            try {
+                // B1. Get signed upload URL from backend
+                const urlData = await getS3UploadUrl(currentUser.uid, file.name);
+                
+                // B2. Upload to S3 using signed URL
+                const uploadResult = await uploadFileToS3(file, urlData.uploadUrl);
 
-            if (uploadResult.success) {
-                // C. Save to Airtable with tier metadata
-                await createFileRecord({
-                    originalName: file.name,
-                    size: file.size,
-                    userId: currentUser.uid,
-                    userTier: effectiveTier,
-                    uploadTimestamp: new Date().toISOString(),
-                    pageCount: pageCount // Store page count for PDFs
-                });
+                if (uploadResult.success) {
+                    // C. Save to Airtable with tier metadata
+                    await createFileRecord({
+                        originalName: file.name,
+                        newName: file.name,
+                        size: file.size,
+                        userId: currentUser.uid,
+                        userTier: effectiveTier,
+                        url: uploadResult.url,
+                        uploadTimestamp: new Date().toISOString(),
+                        pageCount: pageCount // Store page count for PDFs
+                    });
 
-                // Track successful upload for batch make.com request
-                successfullyUploadedFiles.push({
-                    originalName: file.name,
-                    size: file.size
-                });
-            } else {
-                // Handle failure (remove temp file or show error)
-                console.error("Upload failed");
+                    // Track successful upload for batch make.com request
+                    successfullyUploadedFiles.push({
+                        originalName: file.name,
+                        size: file.size
+                    });
+                } else {
+                    // Handle failure (remove temp file or show error)
+                    console.error("Upload failed");
+                    setUploadedFiles(prev => prev.filter(f => f.id !== tempId));
+                    errorMessages.push(`Failed to upload ${file.name}`);
+                }
+            } catch (error) {
+                console.error("Error during file upload:", error);
                 setUploadedFiles(prev => prev.filter(f => f.id !== tempId));
-                errorMessages.push(`Failed to upload ${file.name}`);
+                errorMessages.push(`Error uploading ${file.name}: ${error.message}`);
             }
         }
 
