@@ -1,6 +1,6 @@
 // Backend server for Stripe payments + Airtable + S3 operations
 // Handles payment intents, user management, file operations
-// Install: npm install express cors dotenv stripe @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
+// Install: npm install express cors dotenv stripe @aws-sdk/client-s3 @aws-sdk/s3-request-presigner selfsigned
 // Run: node server.js
 
 import express from 'express';
@@ -9,12 +9,41 @@ import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import selfsigned from 'selfsigned';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const PORT = process.env.PORT || 3001;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+
+// Certificate paths
+const certDir = path.join(__dirname, '.certs');
+const certPath = path.join(certDir, 'server.crt');
+const keyPath = path.join(certDir, 'server.key');
+
+// Helper function to generate self-signed certificate
+const generateSelfSignedCert = () => {
+  if (!fs.existsSync(certDir)) {
+    fs.mkdirSync(certDir, { recursive: true });
+  }
+  
+  if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+    console.log('Generating self-signed certificate...');
+    const pems = selfsigned.generate([{ name: 'commonName', value: 'localhost' }]);
+    fs.writeFileSync(certPath, pems.cert);
+    fs.writeFileSync(keyPath, pems.private);
+    console.log('✅ Self-signed certificate generated');
+  }
+};
 
 // Middleware
 app.use(cors({
@@ -1410,8 +1439,21 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
+// Start servers
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Payment server running on http://0.0.0.0:${PORT}`);
+  console.log(`🚀 Payment server running on HTTP at http://0.0.0.0:${PORT}`);
   console.log(`Backend URL: ${process.env.BACKEND_URL || `http://localhost:${PORT}`}`);
+});
+
+// Start HTTPS server
+generateSelfSignedCert();
+
+const httpsOptions = {
+  cert: fs.readFileSync(certPath),
+  key: fs.readFileSync(keyPath)
+};
+
+https.createServer(httpsOptions, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+  console.log(`🔒 Payment server running on HTTPS at https://0.0.0.0:${HTTPS_PORT}`);
+  console.log(`Frontend should use: https://nexiom-ai-env.eba-mb3a2xgf.us-east-2.elasticbeanstalk.com`);
 });

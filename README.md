@@ -2,7 +2,7 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-<!-- Build trigger: May 2, 2026 - Backend URL fix -->
+<!-- Build trigger: May 2, 2026 - HTTPS backend URL -->
 
 Currently, two official plugins are available:
 
