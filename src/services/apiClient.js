@@ -7,6 +7,12 @@
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 /**
+ * Get the backend URL
+ * @returns {string} Backend URL
+ */
+export const getBackendUrl = () => BACKEND_URL;
+
+/**
  * Make authenticated API request to backend
  * @param {string} endpoint - API endpoint path (e.g., '/api/user/123')
  * @param {object} options - Fetch options (method, body, etc.)

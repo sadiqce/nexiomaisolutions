@@ -1,44 +1,32 @@
-// Airtable Configuration
-const AIRTABLE_CONFIG = {
-    baseId: import.meta.env.VITE_AIRTABLE_BASE_ID ,
-    apiKey: import.meta.env.VITE_AIRTABLE_API_KEY,
-    usersTable: 'Users',
-    filesTable: 'Files'
-};
+// Airtable Service - Routes through Backend
+// DO NOT call Airtable directly from frontend - all requests go through backend
+// Backend handles credentials securely on server-side
 
-const headers = {
-    'Authorization': `Bearer ${AIRTABLE_CONFIG.apiKey}`,
-    'Content-Type': 'application/json'
-};
+import { getBackendUrl } from './apiClient.js';
 
-// Debug: Log config on load (remove in production)
-if (!AIRTABLE_CONFIG.baseId || !AIRTABLE_CONFIG.apiKey) {
-    console.error('Missing Airtable credentials. Check VITE_AIRTABLE_BASE_ID and VITE_AIRTABLE_API_KEY env vars');
-}
+const BACKEND_URL = getBackendUrl();
 
 // --- USER FUNCTIONS ---
 
 export const checkUserExists = async (field, value) => {
-    // Filter formula: ({Field} = 'value')
-    const formula = `({${field}} = '${value}')`;
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
-
     try {
-        const response = await fetch(url, { headers });
-        const data = await response.json();
-        
-        if (!response.ok) {
-            const errorMsg = data.error?.message || 'Unknown error';
-            console.error(
-                `Airtable API Error (${response.status}): ${errorMsg}\n` +
-                `Table: ${AIRTABLE_CONFIG.usersTable}\n` +
-                `Field: ${field}\n` +
-                `Value: ${value}`
-            );
-            throw new Error(`Airtable API error: ${response.status} - ${errorMsg}`);
+        // Firebase UID check
+        if (field === 'UserID') {
+            const response = await fetch(`${BACKEND_URL}/api/user/${value}`, {
+                headers: { 'Content-Type': 'application/json' }
+            });
+            return response.ok;
         }
         
-        return data.records.length > 0;
+        // For other fields, call backend to check
+        const response = await fetch(`${BACKEND_URL}/api/user-check`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ field, value })
+        });
+        
+        const data = await response.json();
+        return response.ok && data.exists;
     } catch (error) {
         console.error("Error checking user existence:", error);
         throw error;
@@ -46,28 +34,21 @@ export const checkUserExists = async (field, value) => {
 };
 
 export const createAirtableUser = async (userData) => {
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}`;
-    
-    const record = {
-        fields: {
-            Username: userData.username,
-            Email: userData.email,
-            UserID: userData.uid, // Firebase Auth ID
-            CreatedDate: new Date().toISOString(),
-            Tier: 'Free'
-        }
-    };
-
     try {
-        const response = await fetch(url, {
+        const response = await fetch(`${BACKEND_URL}/api/user`, {
             method: 'POST',
-            headers,
-            body: JSON.stringify({ records: [record] })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: userData.username,
+                email: userData.email,
+                uid: userData.uid
+            })
         });
+        
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(`Airtable API error: ${response.status} - ${data.error?.message || 'Unknown error'}`);
+            throw new Error(`Failed to create user: ${data.error}`);
         }
         
         return data;
@@ -78,22 +59,21 @@ export const createAirtableUser = async (userData) => {
 };
 
 export const getUser = async (uid) => {
-    const formula = `({UserID} = '${uid}')`;
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
-
     try {
-        const response = await fetch(url, { headers });
+        const response = await fetch(`${BACKEND_URL}/api/user/${uid}`, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(`Airtable API error: ${response.status} - ${data.error?.message || 'Unknown error'}`);
+            if (response.status === 404) {
+                return null;
+            }
+            throw new Error(`Failed to get user: ${data.error}`);
         }
         
-        if (data.records.length === 0) {
-            return null;
-        }
-        
-        return data.records[0].fields;
+        return data;
     } catch (error) {
         console.error("Failed to get user:", error);
         throw error;
@@ -104,100 +84,50 @@ export const getUser = async (uid) => {
 
 export const fetchUserFiles = async (userId) => {
     try {
-       
-        // Filter files by the user's Airtable Record ID
-        const formula = `({UserID} = '${userId}')`;
-        const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
-
-        const response = await fetch(url, { headers });
+        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/files`, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
         const data = await response.json();
-        console.log('Airtable API response:', data);
         
         if (!response.ok) {
-            console.error(
-                `Airtable API Error (${response.status}):\n` +
-                `Table: ${AIRTABLE_CONFIG.filesTable}\n` +
-                `Error: ${data.error?.message || 'Unknown error'}`
-            );
-            throw new Error(`Airtable API error: ${response.status} - ${data.error?.message || 'Unknown error'}`);
+            throw new Error(`Failed to fetch files: ${data.error}`);
         }
         
-        // Map Airtable records to a cleaner format for our UI
-        return data.records.map(record => ({
-            id: record.id,
-            originalName: record.fields['OriginalFileName'],
-            newName: record.fields['NewFileName'],
-            size: record.fields['FileSize'],
-            uploadDate: record.fields['UploadTimestamp'], // Use UploadTimestamp from Airtable
-            url: record.fields['DownloadLink'], // Changed from downloadLink to url
-            status: 'Uploaded', // Default status since it's in the DB
-            pageCount: record.fields['PageCount'] || null // Include page count if available
-        }));
+        return data;
     } catch (error) {
         console.error("Failed to fetch files:", error);
         return [];
     }
 };
 
-// Helper function to get Airtable User record ID by Firebase UID
+// Helper function - no longer needed since backend handles record ID internally
 export const getUserRecordId = async (firebaseUid) => {
-    const formula = `({UserID} = '${firebaseUid}')`;
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
-
-    try {
-        const response = await fetch(url, { headers });
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to get user record: ${data.error?.message}`);
-        }
-        
-        if (data.records.length === 0) {
-            throw new Error(`User with UID ${firebaseUid} not found in Airtable`);
-        }
-        
-        return data.records[0].id; // Return the Airtable record ID
-    } catch (error) {
-        console.error("Error getting user record ID:", error);
-        throw error;
-    }
+    // This is now handled on the backend
+    // Return the UID itself as it's used by the backend
+    return firebaseUid;
 };
 
 export const createFileRecord = async (fileData) => {
-    const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}`;
-    
     try {
-        // Get the Airtable User record ID first
-        const userRecordId = await getUserRecordId(fileData.userId);
-         console.log('User Record ID:', userRecordId);
-         
-        const uploadTimestamp = fileData.uploadTimestamp || new Date().toISOString();
-        
-        const record = {
-            fields: {
-                "OriginalFileName": fileData.originalName,
-                "NewFileName": fileData.newName,
-                "FileSize": fileData.size,
-                "UploadTimestamp": uploadTimestamp,
-                "DownloadLink": fileData.url,
-                "UserID": [userRecordId], // Pass as array of record IDs for linked field
-                "UserTier": fileData.userTier || 'Sandbox', // Add tier tracking
-                "PageCount": fileData.pageCount || null, // Store PDF page count if extracted
-                "Status": "Pending" // Initial status
-            }
-        };
-
-        const response = await fetch(url, {
+        const response = await fetch(`${BACKEND_URL}/api/file`, {
             method: 'POST',
-            headers,
-            body: JSON.stringify({ records: [record] })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: fileData.userId,
+                originalName: fileData.originalName,
+                newName: fileData.newName,
+                size: fileData.size,
+                url: fileData.url,
+                userTier: fileData.userTier || 'Sandbox',
+                pageCount: fileData.pageCount || null
+            })
         });
         
         const data = await response.json();
         
         if (!response.ok) {
-            console.error('Airtable API Error:', response.status, data.error?.message);
-            throw new Error(`Airtable API error: ${response.status} - ${data.error?.message || 'Unknown error'}`);
+            throw new Error(`Failed to create file record: ${data.error}`);
         }
         
         return data;
@@ -214,33 +144,17 @@ export const createFileRecord = async (fileData) => {
  */
 export const getMonthlyUsage = async (userId) => {
     try {
-        const currentDate = new Date();
-        const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/monthly-usage`, {
+            headers: { 'Content-Type': 'application/json' }
+        });
         
-        // Get user record first
-        const userRecordId = await getUserRecordId(userId);
-        
-        // Filter formula to get files uploaded this month
-        const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString();
-        const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
-        
-        const formula = `AND({UserID} = '${userRecordId}', IS_AFTER({UploadTimestamp}, '${monthStart}'), IS_BEFORE({UploadTimestamp}, '${monthEnd}'))`;
-        
-        const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
-        
-        const response = await fetch(url, { headers });
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(`Airtable API error: ${response.status}`);
+            throw new Error(`Failed to get monthly usage: ${data.error}`);
         }
         
-        return {
-            monthKey: currentMonth,
-            filesThisMonth: data.records.length,
-            records: data.records,
-            tierInfo: data.records.length > 0 ? data.records[0].fields.UserTier : null
-        };
+        return data;
     } catch (error) {
         console.error("Failed to get monthly usage:", error);
         // Return default values on error to avoid breaking the app
@@ -254,20 +168,23 @@ export const getMonthlyUsage = async (userId) => {
 };
 
 /**
- * Track top-up pack usage for a user
+ * Get user's top-up credits
  * @param {string} userId - The user's Firebase ID
  * @returns {Promise<number>} Available top-up credits
  */
 export const getTopUpCredits = async (userId) => {
     try {
-        // Get user record
-        const user = await getUser(userId);
+        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/topup-credits`, {
+            headers: { 'Content-Type': 'application/json' }
+        });
         
-        if (!user || !user.TopUpCredits) {
-            return 0;
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(`Failed to get top-up credits: ${data.error}`);
         }
         
-        return user.TopUpCredits;
+        return data.credits || 0;
     } catch (error) {
         console.error("Failed to get top-up credits:", error);
         return 0;
@@ -278,26 +195,28 @@ export const getTopUpCredits = async (userId) => {
  * Update top-up credits for a user
  * @param {string} userId - The user's Firebase ID
  * @param {number} creditsToAdd - Number of credits to add (can be negative to subtract)
- * @returns {Promise<object>} Updated user record
+ * @returns {Promise<object>} Updated credits
  */
 export const updateTopUpCredits = async (userId, creditsToAdd) => {
     try {
-        const userRecordId = await getUserRecordId(userId);
-        const currentCredits = await getTopUpCredits(userId);
-        const newCredits = Math.max(0, currentCredits + creditsToAdd);
-        
-        const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}/${userRecordId}`;
-        
-        const response = await fetch(url, {
+        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/topup-credits`, {
             method: 'PATCH',
-            headers,
-            body: JSON.stringify({
-                fields: {
-                    'TopUpCredits': newCredits
-                }
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ creditsToAdd })
         });
         
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(`Failed to update top-up credits: ${data.error}`);
+        }
+        
+        return data;
+    } catch (error) {
+        console.error("Failed to update top-up credits:", error);
+        throw error;
+    }
+};
         const data = await response.json();
         
         if (!response.ok) {
