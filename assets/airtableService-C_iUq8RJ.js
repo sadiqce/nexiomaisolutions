@@ -1,0 +1,1 @@
+import{g as o}from"./index-6MEnLTfZ.js";const s=o(),n=async e=>{try{const r=await fetch(`${s}/api/user/${e}`,{headers:{"Content-Type":"application/json"}}),t=await r.json();if(!r.ok){if(r.status===404)return null;throw new Error(`Failed to get user: ${t.error}`)}return t}catch(r){throw console.error("Failed to get user:",r),r}};export{n as getUser};
