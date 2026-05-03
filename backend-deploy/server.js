@@ -17,7 +17,7 @@ const requiredEnvVars = ['STRIPE_SECRET_KEY', 'VITE_AIRTABLE_BASE_ID', 'VITE_AIR
 const missingVars = requiredEnvVars.filter(v => !process.env[v]);
 
 if (missingVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingVars);
+  console.error('[ERROR] Missing required environment variables:', missingVars);
   console.error('Server will start but some endpoints will fail');
 }
 
@@ -803,7 +803,7 @@ app.post('/api/create-subscription', async (req, res) => {
     let customerId;
     if (customers.data.length > 0) {
       customerId = customers.data[0].id;
-      console.log(`✓ Using existing Stripe customer: ${customerId}`);
+      console.log(`[OK] Using existing Stripe customer: ${customerId}`);
     } else {
       // Create new customer
       const customer = await stripe.customers.create({
@@ -814,14 +814,14 @@ app.post('/api/create-subscription', async (req, res) => {
         },
       });
       customerId = customer.id;
-      console.log(`✓ Created new Stripe customer: ${customerId}`);
+      console.log(`[OK] Created new Stripe customer: ${customerId}`);
     }
 
     // Attach payment method to customer if provided
     if (paymentMethodId) {
       try {
         await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-        console.log(`✓ Attached payment method ${paymentMethodId} to customer ${customerId}`);
+        console.log(`[OK] Attached payment method ${paymentMethodId} to customer ${customerId}`);
 
         // Set this payment method as the default for the customer
         await stripe.customers.update(customerId, {
@@ -829,9 +829,9 @@ app.post('/api/create-subscription', async (req, res) => {
             default_payment_method: paymentMethodId,
           },
         });
-        console.log(`✓ Set as default payment method for customer`);
+        console.log(`[OK] Set as default payment method for customer`);
       } catch (error) {
-        console.warn(`⚠ Warning: Could not attach payment method: ${error.message}`);
+        console.warn(`[WARN] Warning: Could not attach payment method: ${error.message}`);
         // Continue anyway - subscription creation might still work
       }
     }
@@ -869,7 +869,7 @@ app.post('/api/create-subscription', async (req, res) => {
       const trialEndDate = new Date(activationDate);
       const trialEndTimestamp = Math.floor(trialEndDate.getTime() / 1000);
       subscriptionConfig.trial_end = trialEndTimestamp;
-      console.log(`✓ Deferred billing enabled (trial). First charge on: ${activationDate} for FULL monthly amount`);
+      console.log(`[OK] Deferred billing enabled (trial). First charge on: ${activationDate} for FULL monthly amount`);
     }
     
     const subscription = await stripe.subscriptions.create(subscriptionConfig);
@@ -895,7 +895,7 @@ app.post('/api/create-subscription', async (req, res) => {
       // FALLBACK: If still no payment intent, create a standalone one for this amount
       // This ensures frontend always has a client_secret to use for payment
       if (!paymentIntent || !paymentIntent.client_secret) {
-        console.warn(`⚠ Payment intent not found on subscription, creating standalone payment intent as fallback`);
+        console.warn(`[WARN] Payment intent not found on subscription, creating standalone payment intent as fallback`);
         
         // Get the price details to determine the amount
         const price = await stripe.prices.retrieve(priceId);
@@ -919,19 +919,19 @@ app.post('/api/create-subscription', async (req, res) => {
           setup_future_usage: 'off_session', // Save payment method for future charges
         });
 
-        console.log(`✓ Created fallback payment intent ${paymentIntent.id}`);
+        console.log(`[OK] Created fallback payment intent ${paymentIntent.id}`);
       }
     } else {
-      console.log(`✓ Deferred billing: No immediate payment required. First invoice scheduled for ${activationDate}`);
+      console.log(`[OK] Deferred billing: No immediate payment required. First invoice scheduled for ${activationDate}`);
     }
 
-    console.log(`✓ Created subscription ${subscription.id}`);
-    console.log(`✓ Subscription status: ${subscription.status}`);
+    console.log(`[OK] Created subscription ${subscription.id}`);
+    console.log(`[OK] Subscription status: ${subscription.status}`);
     
     // For deferred billing, no payment is collected now
     // For immediate billing, return client_secret for payment confirmation
     if (isDeferred && activationDate) {
-      console.log(`✓ Deferred subscription created. No immediate payment needed.`);
+      console.log(`[OK] Deferred subscription created. No immediate payment needed.`);
       res.json({
         subscriptionId: subscription.id,
         status: subscription.status,
@@ -941,8 +941,8 @@ app.post('/api/create-subscription', async (req, res) => {
         message: `Subscription scheduled to start on ${activationDate}. No payment required now.`,
       });
     } else {
-      console.log(`✓ Payment intent status: ${paymentIntent?.status}`);
-      console.log(`✓ Returning client_secret for frontend payment confirmation`);
+      console.log(`[OK] Payment intent status: ${paymentIntent?.status}`);
+      console.log(`[OK] Returning client_secret for frontend payment confirmation`);
       res.json({
         subscriptionId: subscription.id,
         clientSecret: paymentIntent?.client_secret,
@@ -982,7 +982,7 @@ app.post('/api/finalize-subscription', async (req, res) => {
 
     // If already active, nothing to do
     if (subscription.status === 'active') {
-      console.log(`✓ Subscription ${subscriptionId} is already active`);
+      console.log(`[OK] Subscription ${subscriptionId} is already active`);
       return res.json({
         success: true,
         subscriptionId: subscription.id,
@@ -1038,7 +1038,7 @@ app.post('/api/finalize-subscription', async (req, res) => {
       try {
         console.log(`Finalizing invoice ${invoiceId}...`);
         await stripe.invoices.finalizeInvoice(invoiceId);
-        console.log(`✓ Finalized invoice`);
+        console.log(`[OK] Finalized invoice`);
       } catch (finalizeError) {
         console.warn(`Could not finalize invoice: ${finalizeError.message}`);
       }
@@ -1053,13 +1053,13 @@ app.post('/api/finalize-subscription', async (req, res) => {
           paid_out_of_band: true,
           charge: chargeId,
         });
-        console.log(`✓ Marked invoice as paid with charge ${chargeId}`);
+        console.log(`[OK] Marked invoice as paid with charge ${chargeId}`);
       } else {
         // Mark as paid out of band
         await stripe.invoices.pay(invoiceId, {
           paid_out_of_band: true,
         });
-        console.log(`✓ Marked invoice as paid (out of band)`);
+        console.log(`[OK] Marked invoice as paid (out of band)`);
       }
     } catch (payError) {
       console.error(`Error marking invoice as paid: ${payError.message}`);
@@ -1077,7 +1077,7 @@ app.post('/api/finalize-subscription', async (req, res) => {
 
     // Retrieve fresh subscription state
     const finalSubscription = await stripe.subscriptions.retrieve(subscriptionId);
-    console.log(`✓ Final subscription ${subscriptionId} status: ${finalSubscription.status}`);
+    console.log(`[OK] Final subscription ${subscriptionId} status: ${finalSubscription.status}`);
 
     // Log the invoice status as well
     const finalInvoice = await stripe.invoices.retrieve(invoiceId);
@@ -1123,7 +1123,7 @@ app.post('/api/attach-payment-method-to-subscription', async (req, res) => {
     // Attach payment method to customer
     try {
       await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-      console.log(`✓ Attached payment method ${paymentMethodId} to customer ${customerId}`);
+      console.log(`[OK] Attached payment method ${paymentMethodId} to customer ${customerId}`);
     } catch (attachError) {
       // Payment method might already be attached - continue
       if (attachError.code !== 'payment_method_already_attached') {
@@ -1140,8 +1140,8 @@ app.post('/api/attach-payment-method-to-subscription', async (req, res) => {
       },
     });
 
-    console.log(`✓ Updated subscription with default payment method`);
-    console.log(`✓ Subscription status: ${updatedSubscription.status}`);
+    console.log(`[OK] Updated subscription with default payment method`);
+    console.log(`[OK] Subscription status: ${updatedSubscription.status}`);
 
     res.json({
       success: true,
@@ -1186,7 +1186,7 @@ app.post('/api/cancel-subscription', async (req, res) => {
       cancel_at_period_end: true, // Let the subscription continue until the end of the billing period
     });
 
-    console.log(`✓ Subscription ${subscriptionId} cancelled successfully`);
+    console.log(`[OK] Subscription ${subscriptionId} cancelled successfully`);
     res.json({
       subscriptionId: subscription.id,
       status: subscription.status,
@@ -1268,7 +1268,7 @@ app.post('/api/cancel-pending-subscription', async (req, res) => {
     console.log(`Cancelling pending subscription ${pendingSubscription.id}`);
     const cancelledSub = await stripe.subscriptions.del(pendingSubscription.id);
 
-    console.log(`✓ Pending subscription cancelled: ${cancelledSub.id}`);
+    console.log(`[OK] Pending subscription cancelled: ${cancelledSub.id}`);
 
     res.json({
       success: true,
@@ -1387,7 +1387,7 @@ app.post('/api/check-pending-activation', async (req, res) => {
     }
 
     // Activation date reached! Update user tier
-    console.log(`✓ Activating pending tier: ${user.PendingTier} for user ${userId}`);
+    console.log(`[OK] Activating pending tier: ${user.PendingTier} for user ${userId}`);
     
     const updated = await updateServerUserSubscription(userId, {
       subscriptionTier: user.PendingTier,
@@ -1421,7 +1421,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Backend server running on http://0.0.0.0:${PORT}`);
+  console.log(`[INFO] Backend server running on http://0.0.0.0:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
 });
