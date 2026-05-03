@@ -12,8 +12,17 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 dotenv.config();
 
+// Validate required environment variables
+const requiredEnvVars = ['STRIPE_SECRET_KEY', 'VITE_AIRTABLE_BASE_ID', 'VITE_AIRTABLE_API_KEY', 'VITE_AWS_ACCESS_KEY_ID', 'VITE_AWS_SECRET_ACCESS_KEY'];
+const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+
+if (missingVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingVars);
+  console.error('Server will start but some endpoints will fail');
+}
+
 const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
 const PORT = process.env.PORT || 3001;
 
 // Middleware
