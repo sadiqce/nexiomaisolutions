@@ -25,4 +25,4 @@ dist-ssr
 *.env
 *.md
 *.zip
-*https.config
+01-https.config
