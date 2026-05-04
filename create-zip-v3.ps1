@@ -38,6 +38,8 @@ Get-ChildItem $ebExtPath -File | ForEach-Object {
     Write-Host "[OK] Added $entryPath"
 }
 
+# Note: .platform directory not included (using .ebextensions approach instead)
+
 $zip.Dispose()
 
 Write-Host "[OK] Zip created successfully"

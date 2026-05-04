@@ -185,6 +185,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ message: 'Nexiom AI Backend API', version: '1.0.0', status: 'running' });
+});
+
 // ===== AIRTABLE ENDPOINTS =====
 
 /**
