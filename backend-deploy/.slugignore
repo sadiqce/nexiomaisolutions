@@ -1,0 +1,13 @@
+# Heroku slug optimization - files to exclude from deployment
+.git/
+.gitignore
+*.md
+node_modules/
+npm-debug.log
+.env
+.env.*
+.DS_Store
+*.log
+coverage/
+test/
+tests/
