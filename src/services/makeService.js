@@ -1,12 +1,10 @@
 // Make.com Configuration
 const MAKE_CONFIG = {
     webhookUrl: 'https://hook.us2.make.com/r1kkqcj8rkfo22ofu82ist9kmwlvkrbw',
-    apiKey: import.meta.env.VITE_AIRTABLE_BASE_ID,
 };
 
 const headers = {
     'Content-Type': 'application/json',
-    'x-make-apikey': `${MAKE_CONFIG.apiKey}`
 };
 
 // --- TRIGGER FUNCTIONS ---
