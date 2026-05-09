@@ -21,13 +21,38 @@ const AppContent = () => {
     // Handle URL-based routing for direct portal access
     useEffect(() => {
         const path = window.location.pathname;
-        if (path === '/portal' || path === '/portal/') {
+        const search = window.location.search;
+        
+        // Check if redirected with portal query param (e.g., /?/portal)
+        if (search.includes('portal')) {
+            setCurrentPage('PortalDashboard');
+            window.history.replaceState({}, '', '/portal');
+        } else if (path === '/portal' || path === '/portal/') {
             setCurrentPage('PortalDashboard');
         } else if (path === '/pricing' || path === '/pricing/') {
             setCurrentPage('Pricing');
         } else if (path === '/terms' || path === '/terms/') {
             setCurrentPage('TermsOfUse');
         }
+    }, []);
+    
+    // Listen for popstate events (browser back/forward)
+    useEffect(() => {
+        const handlePopState = () => {
+            const path = window.location.pathname;
+            if (path === '/portal' || path === '/portal/') {
+                setCurrentPage('PortalDashboard');
+            } else if (path === '/pricing' || path === '/pricing/') {
+                setCurrentPage('Pricing');
+            } else if (path === '/terms' || path === '/terms/') {
+                setCurrentPage('TermsOfUse');
+            } else {
+                setCurrentPage('Home');
+            }
+        };
+        
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
     }, []);
 
     const navigate = useCallback((page) => {
