@@ -49,6 +49,8 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     await checkAndActivatePendingTier(currentUser.uid);
                     
                     const user = await getUser(currentUser.uid);
+                    console.log('[DEBUG] User data:', user);
+                    
                     if (user) {
                         setUserTier(user.Tier);
                         setSubscriptionStatus(user.SubscriptionStatus);
@@ -74,9 +76,12 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     }
                     
                     const files = await fetchUserFiles(currentUser.uid);
-                    setUploadedFiles(files);
+                    console.log('[DEBUG] Fetched files:', files);
+                    console.log('[DEBUG] Files count:', files ? files.length : 0);
+                    setUploadedFiles(files || []);
                 } catch (error) {
                     console.error('Failed to fetch files:', error);
+                    console.log('[DEBUG] Error details:', error.message);
                 }
             };
             

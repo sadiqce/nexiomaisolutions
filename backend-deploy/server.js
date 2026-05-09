@@ -105,19 +105,29 @@ const getServerUserRecordId = async (uid) => {
 
     const formula = `({UserID} = '${uid}')`;
     const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
+    
+    console.log(`[DEBUG] Getting user record ID for UID: ${uid}`);
+    console.log(`[DEBUG] Query URL: ${url}`);
 
     const response = await fetch(url, { headers: getAirtableHeaders() });
     const data = await response.json();
     
+    console.log(`[DEBUG] Airtable response status: ${response.status}`);
+    
     if (!response.ok) {
+      console.error(`[DEBUG] Airtable error: ${data.error?.message}`);
       throw new Error(`Failed to get user record: ${data.error?.message}`);
     }
+    
+    console.log(`[DEBUG] Records found: ${data.records.length}`);
     
     if (data.records.length === 0) {
       throw new Error(`User with UID ${uid} not found in Airtable`);
     }
     
-    return data.records[0].id;
+    const recordId = data.records[0].id;
+    console.log(`[DEBUG] Resolved record ID: ${recordId}`);
+    return recordId;
   } catch (error) {
     console.error("Server: Failed to get user record ID:", error);
     throw error;
@@ -323,20 +333,31 @@ app.patch('/api/user/:uid/subscription', async (req, res) => {
 app.get('/api/user/:uid/files', async (req, res) => {
   try {
     const { uid } = req.params;
+    console.log(`[FILES API] Fetching files for user: ${uid}`);
     
     // First get the user's Airtable record ID
     const userRecordId = await getServerUserRecordId(uid);
+    console.log(`[FILES API] User record ID: ${userRecordId}`);
     
     // Filter files by user - search for the user ID in the linked records array
     const formula = `FIND("${userRecordId}", ARRAYJOIN({UserID})) > 0`;
+    console.log(`[FILES API] Using formula: ${formula}`);
+    
     const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
+    console.log(`[FILES API] Query URL: ${url}`);
 
     const response = await fetch(url, { headers: getAirtableHeaders() });
     const data = await response.json();
     
+    console.log(`[FILES API] Airtable response status: ${response.status}`);
+    console.log(`[FILES API] Airtable response:`, JSON.stringify(data).substring(0, 500));
+    
     if (!response.ok) {
+      console.error(`[FILES API] Airtable error: ${data.error?.message}`);
       return res.status(response.status).json({ error: data.error?.message || 'Failed to fetch files' });
     }
+    
+    console.log(`[FILES API] Found ${data.records.length} files`);
     
     const files = data.records.map(record => ({
       id: record.id,
@@ -351,7 +372,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
     
     res.json(files);
   } catch (error) {
-    console.error('Error fetching files:', error);
+    console.error('[FILES API] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
