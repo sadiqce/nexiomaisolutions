@@ -327,8 +327,8 @@ app.get('/api/user/:uid/files', async (req, res) => {
     // First get the user's Airtable record ID
     const userRecordId = await getServerUserRecordId(uid);
     
-    // Filter files by user
-    const formula = `({UserID} = '${userRecordId}')`;
+    // Filter files by user - using FIND to match linked records in array
+    const formula = `FIND('${userRecordId}', CONCATENATE({UserID})) > 0`;
     const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
 
     const response = await fetch(url, { headers: getAirtableHeaders() });
