@@ -105,29 +105,19 @@ const getServerUserRecordId = async (uid) => {
 
     const formula = `({UserID} = '${uid}')`;
     const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.usersTable}?filterByFormula=${encodeURIComponent(formula)}`;
-    
-    console.log(`[DEBUG] Getting user record ID for UID: ${uid}`);
-    console.log(`[DEBUG] Query URL: ${url}`);
 
     const response = await fetch(url, { headers: getAirtableHeaders() });
     const data = await response.json();
     
-    console.log(`[DEBUG] Airtable response status: ${response.status}`);
-    
     if (!response.ok) {
-      console.error(`[DEBUG] Airtable error: ${data.error?.message}`);
       throw new Error(`Failed to get user record: ${data.error?.message}`);
     }
-    
-    console.log(`[DEBUG] Records found: ${data.records.length}`);
     
     if (data.records.length === 0) {
       throw new Error(`User with UID ${uid} not found in Airtable`);
     }
     
-    const recordId = data.records[0].id;
-    console.log(`[DEBUG] Resolved record ID: ${recordId}`);
-    return recordId;
+    return data.records[0].id;
   } catch (error) {
     console.error("Server: Failed to get user record ID:", error);
     throw error;
@@ -339,25 +329,34 @@ app.get('/api/user/:uid/files', async (req, res) => {
     const userRecordId = await getServerUserRecordId(uid);
     console.log(`[FILES API] User record ID: ${userRecordId}`);
     
-    // Filter files by user - search for the user ID in the linked records array
-    const formula = `FIND("${userRecordId}", ARRAYJOIN({UserID})) > 0`;
-    console.log(`[FILES API] Using formula: ${formula}`);
+    // First, fetch ALL files to debug - see if any files exist
+    const allFilesUrl = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}`;
+    console.log(`[FILES API] Fetching all files from: ${allFilesUrl}`);
     
+    const allFilesResponse = await fetch(allFilesUrl, { headers: getAirtableHeaders() });
+    const allFilesData = await allFilesResponse.json();
+    
+    console.log(`[FILES API] Total files in database: ${allFilesData.records ? allFilesData.records.length : 0}`);
+    
+    if (allFilesData.records && allFilesData.records.length > 0) {
+      console.log(`[FILES API] Sample file structure:`, JSON.stringify(allFilesData.records[0].fields).substring(0, 300));
+    }
+    
+    // Now filter by user using linked record syntax
+    // For linked records, we use a simpler approach - check if record ID is in the array
+    const formula = `FIND("${userRecordId}", CONCATENATE({UserID})) > 0`;
     const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?filterByFormula=${encodeURIComponent(formula)}`;
-    console.log(`[FILES API] Query URL: ${url}`);
+    console.log(`[FILES API] Query URL with formula: ${url}`);
 
     const response = await fetch(url, { headers: getAirtableHeaders() });
     const data = await response.json();
     
     console.log(`[FILES API] Airtable response status: ${response.status}`);
-    console.log(`[FILES API] Airtable response:`, JSON.stringify(data).substring(0, 500));
+    console.log(`[FILES API] Filtered results: ${data.records ? data.records.length : 0} files`);
     
     if (!response.ok) {
-      console.error(`[FILES API] Airtable error: ${data.error?.message}`);
       return res.status(response.status).json({ error: data.error?.message || 'Failed to fetch files' });
     }
-    
-    console.log(`[FILES API] Found ${data.records.length} files`);
     
     const files = data.records.map(record => ({
       id: record.id,
@@ -370,6 +369,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
       pageCount: record.fields['PageCount'] || null
     }));
     
+    console.log(`[FILES API] Returning ${files.length} files`);
     res.json(files);
   } catch (error) {
     console.error('[FILES API] Error:', error);
