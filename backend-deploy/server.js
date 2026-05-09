@@ -327,38 +327,22 @@ app.get('/api/user/:uid/files', async (req, res) => {
     
     // First get the user's Airtable record ID
     const userRecordId = await getServerUserRecordId(uid);
-    console.log(`[FILES API] User record ID: ${userRecordId}`);
     
     // Approach 1: Fetch ALL files first to see what exists
     const allFilesUrl = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${AIRTABLE_CONFIG.filesTable}?pageSize=100`;
     const allFilesResponse = await fetch(allFilesUrl, { headers: getAirtableHeaders() });
     const allFilesData = await allFilesResponse.json();
     
-    console.log(`[FILES API] Total files in database: ${allFilesData.records ? allFilesData.records.length : 0}`);
-    
-    // Log first file to debug structure
-    if (allFilesData.records && allFilesData.records.length > 0) {
-      const firstFile = allFilesData.records[0];
-      console.log(`[FILES API] First file record ID: ${firstFile.id}`);
-      console.log(`[FILES API] First file UserID field:`, JSON.stringify(firstFile.fields['UserID']));
-      console.log(`[FILES API] First file name: ${firstFile.fields['OriginalFileName']}`);
-    }
-    
-    // Now try filtering - but check if the UserID array contains our record ID
+    // Check if we have records to filter
     if (!allFilesData.records) {
       return res.json([]);
     }
     
+    // Filter files to only include those linked to this user
     const userFiles = allFilesData.records.filter(record => {
       const userIDArray = record.fields['UserID'] || [];
-      const hasMatch = userIDArray.includes(userRecordId);
-      if (hasMatch) {
-        console.log(`[FILES API] Found matching file: ${record.fields['OriginalFileName']}`);
-      }
-      return hasMatch;
+      return userIDArray.includes(userRecordId);
     });
-    
-    console.log(`[FILES API] Found ${userFiles.length} files for user ${userRecordId}`);
     
     const files = userFiles.map(record => ({
       id: record.id,
