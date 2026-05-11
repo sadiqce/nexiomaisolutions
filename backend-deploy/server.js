@@ -332,32 +332,65 @@ app.get('/api/user/:uid/files', async (req, res) => {
     
     // Helper to normalize dates to ISO format
     const normalizeDate = (dateValue) => {
-      if (!dateValue) return new Date().toISOString();
+      if (!dateValue) return null; // Return null instead of current time
       
-      // If already a Date object or ISO string
-      if (dateValue instanceof Date) return dateValue.toISOString();
-      if (typeof dateValue === 'string' && dateValue.includes('T')) return dateValue;
-      
-      // Parse custom format like "2026-05-09 1:08am"
-      try {
-        const date = new Date(dateValue);
-        if (!isNaN(date.getTime())) return date.toISOString();
-      } catch (e) {
-        // Silent fail, return current time
+      // Handle Firestore Timestamp objects
+      if (dateValue.toDate && typeof dateValue.toDate === 'function') {
+        try {
+          return dateValue.toDate().toISOString();
+        } catch (e) {
+          console.warn('[DATE] Firestore Timestamp conversion failed:', e.message);
+        }
       }
       
-      return new Date().toISOString();
+      // Handle _seconds property (alternative Timestamp format)
+      if (dateValue._seconds) {
+        try {
+          return new Date(dateValue._seconds * 1000).toISOString();
+        } catch (e) {
+          console.warn('[DATE] _seconds conversion failed:', e.message);
+        }
+      }
+      
+      // If already a Date object
+      if (dateValue instanceof Date) {
+        try {
+          return dateValue.toISOString();
+        } catch (e) {
+          console.warn('[DATE] Date conversion failed:', e.message);
+        }
+      }
+      
+      // If ISO string, return as-is
+      if (typeof dateValue === 'string' && dateValue.includes('T')) {
+        return dateValue;
+      }
+      
+      // Parse custom format like "2026-05-09 1:08am"
+      if (typeof dateValue === 'string') {
+        try {
+          const date = new Date(dateValue);
+          if (!isNaN(date.getTime())) return date.toISOString();
+        } catch (e) {
+          console.warn('[DATE] Custom format parsing failed:', e.message);
+        }
+      }
+      
+      // If all parsing fails, log and return null
+      console.warn('[DATE] Unable to parse date:', dateValue);
+      return null;
     };
     
     // Map and sort files - returns only needed fields for faster rendering
     const files = filesSnapshot.docs.map(doc => {
       const data = doc.data();
+      const uploadDate = normalizeDate(data.UploadedAt) || new Date().toISOString();
       return {
         id: doc.id,
         originalName: data.FileName || '',
         newName: data.FileName || '',
         size: data.FileSize || 0,
-        uploadDate: normalizeDate(data.UploadedAt),
+        uploadDate: uploadDate,
         url: data.URL || '',
         status: data.Status || 'Pending'
       };
