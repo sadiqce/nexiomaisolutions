@@ -2,11 +2,33 @@
 // DO NOT call Airtable directly from frontend - all requests go through backend
 // Backend handles credentials securely on server-side
 
-import { getBackendUrl } from './apiClient.js';
-
-const BACKEND_URL = getBackendUrl();
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 // --- USER FUNCTIONS ---
+
+/**
+ * Batch check if username and email are available (more efficient than 2 separate checks)
+ */
+export const checkUserAvailability = async (username, email) => {
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/check-user-availability`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, email })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(`Failed to check availability: ${data.error}`);
+        }
+        
+        return data;
+    } catch (error) {
+        console.error("Error checking user availability:", error);
+        throw error;
+    }
+};
 
 export const checkUserExists = async (field, value) => {
     try {

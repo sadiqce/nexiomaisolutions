@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { createAirtableUser, checkUserExists } from '../services/apiClient';
+import { createAirtableUser, checkUserAvailability } from '../services/airtableService';
 
 const CreateAccount = ({ navigate }) => {
     const [formData, setFormData] = useState({
@@ -41,19 +41,20 @@ const CreateAccount = ({ navigate }) => {
             setLoading(true);
 
             try {
-                const usernameExists = await checkUserExists('Username', formData.username);
-                if (usernameExists) {
+                // Batch check for username and email availability (1 API call instead of 2)
+                const availability = await checkUserAvailability(formData.username, formData.email);
+                
+                if (availability.username.exists) {
                     setLoading(false);
                     return setError("Username is already taken.");
                 }
 
-                const emailExists = await checkUserExists('Email', formData.email);
-                if (emailExists) {
+                if (availability.email.exists) {
                     setLoading(false);
                     return setError("An account with this email already exists.");
                 }
             } catch (airtableErr) {
-                console.error("Airtable check error:", airtableErr);
+                console.error("Availability check error:", airtableErr);
                 setLoading(false);
                 return setError("Unable to verify availability. Please try again.");
             }

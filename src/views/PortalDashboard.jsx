@@ -40,14 +40,11 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     const [pendingTier, setPendingTier] = useState(null);
     const [pendingActivationDate, setPendingActivationDate] = useState(null);
 
-    // 1. Fetch User Data and Files on Load
+    // 1. Fetch User Data and Files on Load (no auto-refresh - data updates via webhooks)
     useEffect(() => {
         if (currentUser && isEmailVerified) {
             const fetchFiles = async () => {
                 try {
-                    // Check and activate pending tier via backend
-                    await checkAndActivatePendingTier(currentUser.uid);
-                    
                     const user = await getUser(currentUser.uid);
                     console.log('[DEBUG] User data:', user);
                     
@@ -57,9 +54,10 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                         setSubscriptionEndDate(user.SubscriptionEndDate || null);
                         setPendingTier(user.PendingTier || null);
                         setPendingActivationDate(user.PendingActivationDate || null);
-
+                        
+                        // Check if pending activation date has been reached (only on initial load)
                         if (user.PendingTier && user.PendingActivationDate && new Date(user.PendingActivationDate) <= new Date()) {
-                            await activateScheduledPlan(currentUser.uid, user);
+                            await checkAndActivatePendingTier(currentUser.uid);
                             const updatedUser = await getUser(currentUser.uid);
                             if (updatedUser) {
                                 setUserTier(updatedUser.Tier);
@@ -87,31 +85,12 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
             
             fetchFiles();
             
-            // Auto-refresh file list every 15 seconds to catch Airtable updates
-            autoRefreshIntervalRef.current = setInterval(fetchFiles, 15000);
-            
+            // Return cleanup (remove interval since we no longer auto-refresh)
             return () => {
-                if (autoRefreshIntervalRef.current) {
-                    clearInterval(autoRefreshIntervalRef.current);
-                }
+                // No intervals to clean up with webhook-driven cache
             };
         }
     }, [currentUser, isEmailVerified, refreshTrigger]);
-
-    // 2. Periodically check for pending tier activation (every 60 seconds)
-    useEffect(() => {
-        if (currentUser) {
-            const checkPendingInterval = setInterval(async () => {
-                try {
-                    await checkAndActivatePendingTier(currentUser.uid);
-                } catch (error) {
-                    console.error('Error checking pending tier:', error);
-                }
-            }, 60000); // Check every 60 seconds
-
-            return () => clearInterval(checkPendingInterval);
-        }
-    }, [currentUser]);
 
     // Handle upgrade modal trigger from Header
     useEffect(() => {
