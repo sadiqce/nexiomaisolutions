@@ -7,13 +7,38 @@ const FileList = ({ files = [] }) => {
     const [sortColumn, setSortColumn] = useState('uploadDate');
     const [sortDirection, setSortDirection] = useState('desc');
     
-    // Memoized date formatter to avoid recreating on every render
+    // Memoized date formatter with robust parsing
     const formatDate = useCallback((dateString) => {
         if (!dateString) return '-';
         try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-        } catch {
+            // Try multiple date formats
+            let date;
+            
+            // ISO format or standard parseable format
+            if (dateString.includes('T') || dateString.includes('-')) {
+                date = new Date(dateString);
+            } else if (dateString.includes('am') || dateString.includes('pm')) {
+                // Parse custom format like "2026-05-09 1:08am"
+                date = new Date(dateString.replace(/([0-9]{1,2}:[0-9]{2})(am|pm)/i, '$1:00 $2'));
+            } else {
+                date = new Date(dateString);
+            }
+            
+            if (isNaN(date.getTime())) {
+                return dateString; // Return original if parsing fails
+            }
+            
+            return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric'
+            }) + ' ' + date.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) {
+            console.warn('Date parsing error:', dateString, e);
             return dateString;
         }
     }, []);
@@ -69,8 +94,18 @@ const FileList = ({ files = [] }) => {
                     return (aValue - bValue) * sortMultiplier;
                     
                 case 'uploadDate':
-                    aValue = new Date(a.uploadDate || 0).getTime();
-                    bValue = new Date(b.uploadDate || 0).getTime();
+                    // Parse dates more robustly for sorting
+                    const parseDate = (dateStr) => {
+                        if (!dateStr) return 0;
+                        if (dateStr.includes('T') || dateStr.includes('-')) {
+                            return new Date(dateStr).getTime();
+                        } else if (dateStr.includes('am') || dateStr.includes('pm')) {
+                            return new Date(dateStr.replace(/([0-9]{1,2}:[0-9]{2})(am|pm)/i, '$1:00 $2')).getTime();
+                        }
+                        return new Date(dateStr).getTime();
+                    };
+                    aValue = parseDate(a.uploadDate);
+                    bValue = parseDate(b.uploadDate);
                     return (aValue - bValue) * sortMultiplier;
                     
                 default:

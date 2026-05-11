@@ -40,7 +40,7 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     const [pendingTier, setPendingTier] = useState(null);
     const [pendingActivationDate, setPendingActivationDate] = useState(null);
 
-    // 1. Fetch User Data and Files on Load (no auto-refresh - data updates via webhooks)
+    // 1. Fetch User Data and Files on Load + Set up Real-time Polling
     useEffect(() => {
         if (currentUser && isEmailVerified) {
             const fetchFiles = async () => {
@@ -83,11 +83,19 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                 }
             };
             
+            // Initial fetch
             fetchFiles();
             
-            // Return cleanup (remove interval since we no longer auto-refresh)
+            // Set up real-time polling for file updates (every 20 seconds)
+            // This ensures frontend sees new files/updates from other sources (webhooks, admin uploads, etc.)
+            const pollInterval = setInterval(() => {
+                console.log('[DEBUG] Polling for file updates...');
+                fetchFiles();
+            }, 20000); // 20 seconds
+            
+            // Cleanup interval on unmount or when dependencies change
             return () => {
-                // No intervals to clean up with webhook-driven cache
+                clearInterval(pollInterval);
             };
         }
     }, [currentUser, isEmailVerified, refreshTrigger]);

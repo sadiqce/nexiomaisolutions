@@ -330,6 +330,25 @@ app.get('/api/user/:uid/files', async (req, res) => {
       .limit(limit)
       .get();
     
+    // Helper to normalize dates to ISO format
+    const normalizeDate = (dateValue) => {
+      if (!dateValue) return new Date().toISOString();
+      
+      // If already a Date object or ISO string
+      if (dateValue instanceof Date) return dateValue.toISOString();
+      if (typeof dateValue === 'string' && dateValue.includes('T')) return dateValue;
+      
+      // Parse custom format like "2026-05-09 1:08am"
+      try {
+        const date = new Date(dateValue);
+        if (!isNaN(date.getTime())) return date.toISOString();
+      } catch (e) {
+        // Silent fail, return current time
+      }
+      
+      return new Date().toISOString();
+    };
+    
     // Map and sort files - returns only needed fields for faster rendering
     const files = filesSnapshot.docs.map(doc => {
       const data = doc.data();
@@ -338,7 +357,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
         originalName: data.FileName || '',
         newName: data.FileName || '',
         size: data.FileSize || 0,
-        uploadDate: data.UploadedAt || new Date().toISOString(),
+        uploadDate: normalizeDate(data.UploadedAt),
         url: data.URL || '',
         status: data.Status || 'Pending'
       };
