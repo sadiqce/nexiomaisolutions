@@ -321,9 +321,9 @@ app.get('/api/user/:uid/files', async (req, res) => {
     const { uid } = req.params;
     console.log(`[FILES API] Fetching files for user: ${uid}`);
     
+    // Query files by UserID (no ORDER BY to avoid composite index requirement)
     const filesSnapshot = await db.collection('files')
       .where('UserID', '==', uid)
-      .orderBy('UploadedAt', 'desc')
       .get();
     
     const files = filesSnapshot.docs.map(doc => ({
@@ -335,8 +335,11 @@ app.get('/api/user/:uid/files', async (req, res) => {
       url: doc.data().URL,
       status: doc.data().Status || 'Uploaded',
       pageCount: doc.data().PageCount || null
-    }));
+    }))
+    // Sort by UploadedAt on the server side (descending)
+    .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
     
+    console.log(`[FILES API] Found ${files.length} files for user ${uid}`);
     res.json(files);
   } catch (error) {
     console.error('[FILES API] Error:', error);
