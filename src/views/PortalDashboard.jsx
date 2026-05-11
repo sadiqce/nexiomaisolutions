@@ -45,8 +45,9 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
         if (currentUser && isEmailVerified) {
             const fetchFiles = async () => {
                 try {
+                    console.log('[FETCH] Fetching data for user:', currentUser.uid);
                     const user = await getUser(currentUser.uid);
-                    console.log('[DEBUG] User data:', user);
+                    console.log('[FETCH] User data:', user);
                     
                     if (user) {
                         setUserTier(user.Tier);
@@ -74,12 +75,13 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     }
                     
                     const files = await fetchUserFiles(currentUser.uid);
-                    console.log('[DEBUG] Fetched files:', files);
-                    console.log('[DEBUG] Files count:', files ? files.length : 0);
+                    console.log('[FETCH] Fetched files:', files);
+                    console.log('[FETCH] Files count:', files ? files.length : 0);
+                    console.log('[FETCH] File IDs:', files?.map(f => f.id).join(', '));
                     setUploadedFiles(files || []);
                 } catch (error) {
-                    console.error('Failed to fetch files:', error);
-                    console.log('[DEBUG] Error details:', error.message);
+                    console.error('[FETCH] Failed to fetch files:', error);
+                    console.log('[FETCH] Error details:', error.message);
                 }
             };
             
@@ -223,13 +225,28 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     // Refresh file list manually
     const handleRefreshFiles = async () => {
         setIsRefreshing(true);
+        console.log('[REFRESH] Manual refresh triggered at', new Date().toLocaleTimeString());
         try {
             const files = await fetchUserFiles(currentUser.uid);
-            setUploadedFiles(files);
-            setInfo('File list refreshed. Check if processing is complete.');
+            console.log('[REFRESH] Fetched files:', files);
+            console.log('[REFRESH] File count:', files?.length || 0);
+            
+            // Deep comparison to detect if data actually changed
+            const currentCount = uploadedFiles.length;
+            const newCount = files?.length || 0;
+            
+            if (currentCount !== newCount) {
+                console.log(`[REFRESH] File count changed: ${currentCount} → ${newCount}`);
+                setUploadedFiles(files);
+                setInfo(`File list updated. Found ${newCount} files.`);
+            } else {
+                console.log('[REFRESH] File count unchanged');
+                setInfo(`File list refreshed (${newCount} files found).`);
+            }
+            
             setTimeout(() => setInfo(''), 3000);
         } catch (error) {
-            console.error('Failed to refresh files:', error);
+            console.error('[REFRESH] Failed to refresh files:', error);
             setInfo('Failed to refresh file list. Please try again.');
         } finally {
             setIsRefreshing(false);
