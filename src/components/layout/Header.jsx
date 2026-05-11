@@ -136,6 +136,12 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                         Pricing
                     </a>
                     <a href="#" 
+                        onClick={(e) => { e.preventDefault(); navigate('HowItWorks'); }} 
+                        className="text-sm text-gray-600 hover:text-gray-900 transition"
+                    >
+                        How it Works
+                    </a>
+                    <a href="#" 
                         onClick={(e) => { e.preventDefault(); navigate('TermsOfUse'); }} 
                         className="text-sm text-gray-600 hover:text-gray-900 transition"
                     >
@@ -144,6 +150,14 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                 </nav>
 
                 <div className="flex items-center gap-3 sm:gap-4">
+                    {!isDashboard && (
+                        <a href="#" 
+                            onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} 
+                            className="hidden md:inline text-sm text-gray-600 hover:text-gray-900 transition"
+                        >
+                            Portal
+                        </a>
+                    )}
                     {isDashboard ? (
                         <>
                             {/* Current Plan Display */}
@@ -260,18 +274,6 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                         </>
                     ) : (
                         <>
-                            <a href="#" 
-                                onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} 
-                                className="text-sm text-gray-600 hover:text-gray-900 transition"
-                            >
-                                Portal
-                            </a>
-                            <button 
-                                onClick={() => currentPage === 'Home' ? document.getElementById('contact-form-section')?.scrollIntoView({ behavior: 'smooth' }) : navigate('Home')}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition"
-                            >
-                                Get Started
-                            </button>
                         </>
                     )}
                 </div>

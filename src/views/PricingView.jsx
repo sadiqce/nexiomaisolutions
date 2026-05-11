@@ -86,7 +86,7 @@ const PricingView = () => {
 
   const handlePayment = (planType) => {
     if (planType === 'free') {
-      window.location.assign('/');
+      window.location.assign('/portal/create-account');
       return;
     }
 
@@ -179,6 +179,7 @@ const PricingView = () => {
                   disabled={
                     loading || 
                     (plan.ctaAction !== 'free' && !currentUser) ||
+                    (plan.ctaAction === 'free' && currentUser) ||
                     (plan.ctaAction !== 'free' && pendingTier) ||
                     (plan.ctaAction !== 'free' && currentTier === 'Volume')
                   }
@@ -189,6 +190,7 @@ const PricingView = () => {
                   } ${
                     (loading || 
                     (plan.ctaAction !== 'free' && !currentUser) ||
+                    (plan.ctaAction === 'free' && currentUser) ||
                     (plan.ctaAction !== 'free' && pendingTier) ||
                     (plan.ctaAction !== 'free' && currentTier === 'Volume')) ? 'opacity-50 cursor-not-allowed' : ''
                   }`}

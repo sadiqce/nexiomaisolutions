@@ -10,6 +10,7 @@ import ForgotPassword from './views/ForgotPassword';
 import CreateAccount from './views/CreateAccount'; // New Import
 import PricingView from './views/PricingView';
 import TermsOfUseView from './views/TermsOfUseView';
+import HowItWorks from './views/HowItWorks';
 
 const AppContent = () => {
     const [currentPage, setCurrentPage] = useState('Home');
@@ -27,10 +28,14 @@ const AppContent = () => {
         if (search.includes('portal')) {
             setCurrentPage('PortalDashboard');
             window.history.replaceState({}, '', '/portal');
+        } else if (path === '/portal/create-account' || path === '/portal/create-account/') {
+            setCurrentPage('CreateAccount');
         } else if (path === '/portal' || path === '/portal/') {
             setCurrentPage('PortalDashboard');
         } else if (path === '/pricing' || path === '/pricing/') {
             setCurrentPage('Pricing');
+        } else if (path === '/how-it-works' || path === '/how-it-works/') {
+            setCurrentPage('HowItWorks');
         } else if (path === '/terms' || path === '/terms/') {
             setCurrentPage('TermsOfUse');
         }
@@ -40,10 +45,14 @@ const AppContent = () => {
     useEffect(() => {
         const handlePopState = () => {
             const path = window.location.pathname;
-            if (path === '/portal' || path === '/portal/') {
+            if (path === '/portal/create-account' || path === '/portal/create-account/') {
+                setCurrentPage('CreateAccount');
+            } else if (path === '/portal' || path === '/portal/') {
                 setCurrentPage('PortalDashboard');
             } else if (path === '/pricing' || path === '/pricing/') {
                 setCurrentPage('Pricing');
+            } else if (path === '/how-it-works' || path === '/how-it-works/') {
+                setCurrentPage('HowItWorks');
             } else if (path === '/terms' || path === '/terms/') {
                 setCurrentPage('TermsOfUse');
             } else {
@@ -60,8 +69,12 @@ const AppContent = () => {
         // Update URL for portal
         if (page === 'PortalDashboard') {
             window.history.pushState({}, '', '/portal');
+        } else if (page === 'CreateAccount') {
+            window.history.pushState({}, '', '/portal/create-account');
         } else if (page === 'Pricing') {
             window.history.pushState({}, '', '/pricing');
+        } else if (page === 'HowItWorks') {
+            window.history.pushState({}, '', '/how-it-works');
         } else if (page === 'TermsOfUse') {
             window.history.pushState({}, '', '/terms');
         } else if (page === 'Home') {
@@ -142,6 +155,9 @@ const AppContent = () => {
             break;
         case 'Pricing':
             content = <PricingView />;
+            break;
+        case 'HowItWorks':
+            content = <HowItWorks />;
             break;
         case 'TermsOfUse':
             content = <TermsOfUseView />;
