@@ -314,30 +314,39 @@ app.post('/api/check-pending-activation', async (req, res) => {
 // ===== FIREBASE FILES ENDPOINTS =====
 
 /**
- * GET /api/user/:uid/files - Get all files for a user
+ * GET /api/user/:uid/files - Get all files for a user (optimized for fast rendering)
+ * Query params: ?limit=50 (default 100, max 500)
  */
 app.get('/api/user/:uid/files', async (req, res) => {
   try {
     const { uid } = req.params;
-    console.log(`[FILES API] Fetching files for user: ${uid}`);
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // Cap at 500
     
-    // Query files by UserID (no ORDER BY to avoid composite index requirement)
+    console.log(`[FILES API] Fetching files for user: ${uid} (limit: ${limit})`);
+    
+    // Query files by UserID with limit
     const filesSnapshot = await db.collection('files')
       .where('UserID', '==', uid)
+      .limit(limit)
       .get();
     
-    const files = filesSnapshot.docs.map(doc => ({
-      id: doc.id,
-      originalName: doc.data().FileName,
-      newName: doc.data().FileName,
-      size: doc.data().FileSize,
-      uploadDate: doc.data().UploadedAt,
-      url: doc.data().URL,
-      status: doc.data().Status || 'Uploaded',
-      pageCount: doc.data().PageCount || null
-    }))
-    // Sort by UploadedAt on the server side (descending)
+    // Map and sort files - returns only needed fields for faster rendering
+    const files = filesSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        originalName: data.FileName || '',
+        newName: data.FileName || '',
+        size: data.FileSize || 0,
+        uploadDate: data.UploadedAt || new Date().toISOString(),
+        url: data.URL || '',
+        status: data.Status || 'Pending'
+      };
+    })
     .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
+    
+    // Set cache headers for file list (5 minute cache)
+    res.set('Cache-Control', 'public, max-age=300');
     
     console.log(`[FILES API] Found ${files.length} files for user ${uid}`);
     res.json(files);
