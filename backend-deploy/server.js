@@ -364,8 +364,11 @@ app.get('/api/user/:uid/files', async (req, res) => {
     })
     .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
     
-    // Set cache headers for file list (5 minute cache)
-    res.set('Cache-Control', 'public, max-age=300');
+    // Set cache headers to disable caching for real-time updates
+    // Use no-cache to require revalidation on each request
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     
     console.log(`[FILES API] Found ${files.length} files for user ${uid}`);
     res.json(files);

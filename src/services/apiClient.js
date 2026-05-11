@@ -22,10 +22,18 @@ const apiRequest = async (endpoint, options = {}) => {
   const url = `${BACKEND_URL}${endpoint}`;
   
   try {
+    // Default to no-cache for GET requests to ensure fresh data
+    const method = options.method || 'GET';
+    const cache = options.cache || (method === 'GET' ? 'no-store' : 'default');
+    
     const response = await fetch(url, {
       ...options,
+      cache,
       headers: {
         'Content-Type': 'application/json',
+        // Prevent caching
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         ...options.headers,
       },
     });

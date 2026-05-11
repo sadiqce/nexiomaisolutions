@@ -86,15 +86,16 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
             // Initial fetch
             fetchFiles();
             
-            // Set up real-time polling for file updates (every 20 seconds)
+            // Set up real-time polling for file updates (every 10 seconds)
             // This ensures frontend sees new files/updates from other sources (webhooks, admin uploads, etc.)
             const pollInterval = setInterval(() => {
-                console.log('[DEBUG] Polling for file updates...');
+                console.log('[POLLING] Fetching file updates at', new Date().toLocaleTimeString());
                 fetchFiles();
-            }, 20000); // 20 seconds
+            }, 10000); // 10 seconds for faster updates
             
             // Cleanup interval on unmount or when dependencies change
             return () => {
+                console.log('[POLLING] Clearing polling interval');
                 clearInterval(pollInterval);
             };
         }
