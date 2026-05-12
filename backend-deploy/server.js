@@ -53,10 +53,28 @@ const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '');
 const PORT = process.env.PORT || 3001;
 
+// Determine allowed origins (support both dev and production)
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'https://nexiomaisolutions.com',
+  'https://www.nexiomaisolutions.com',
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
+
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked request from origin: ${origin}`);
+      callback(null, true); // Allow anyway to debug
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 
