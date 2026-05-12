@@ -385,6 +385,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
     };
     
     // Map and sort files - returns only needed fields for faster rendering
+    let loggedSample = false;
     const files = filesSnapshot.docs.map(doc => {
       const data = doc.data();
       const uploadDate = normalizeDate(data.UploadedAt) || new Date().toISOString();
@@ -398,9 +399,10 @@ app.get('/api/user/:uid/files', async (req, res) => {
         status: data.Status || 'Pending'
       };
       // Log first file to debug data structure
-      if (files.length === 0) {
+      if (!loggedSample) {
         console.log(`[FILES API] Sample raw Firestore data:`, JSON.stringify(data, null, 2));
         console.log(`[FILES API] Processed file record:`, fileRecord);
+        loggedSample = true;
       }
       return fileRecord;
     })
