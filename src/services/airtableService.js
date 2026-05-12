@@ -1,162 +1,136 @@
-// Airtable Service - Routes through Backend
-// DO NOT call Airtable directly from frontend - all requests go through backend
-// Backend handles credentials securely on server-side
+/**
+ * Airtable Service - Direct Firestore Operations
+ * Data pulling operations now use Firestore directly instead of backend endpoints
+ * Payment operations still use backend (see paymentService.js)
+ */
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+import {
+  isUsernameAvailable,
+  isEmailAvailable,
+  userExists,
+  createUser,
+  getUserData,
+  getUserFiles,
+  createFileRecord as createFirestoreFileRecord,
+  submitContactForm as submitFirestoreContactForm,
+  getTopUpCredits as getFirestoreTopUpCredits,
+} from './firestoreService';
 
 // --- USER FUNCTIONS ---
 
 /**
- * Batch check if username and email are available (more efficient than 2 separate checks)
+ * Batch check if username and email are available (pulls directly from Firestore)
  */
 export const checkUserAvailability = async (username, email) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/check-user-availability`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, email })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to check availability: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Error checking user availability:", error);
-        throw error;
-    }
+  try {
+    const [usernameAvailable, emailAvailable] = await Promise.all([
+      isUsernameAvailable(username),
+      isEmailAvailable(email),
+    ]);
+
+    return {
+      usernameAvailable,
+      emailAvailable,
+      available: usernameAvailable && emailAvailable,
+    };
+  } catch (error) {
+    console.error('[AIRTABLE] Error checking user availability:', error);
+    throw error;
+  }
 };
 
+/**
+ * Check if user exists by field (pulls from Firestore)
+ */
 export const checkUserExists = async (field, value) => {
-    try {
-        // Firebase UID check
-        if (field === 'UserID') {
-            const response = await fetch(`${BACKEND_URL}/api/user/${value}`, {
-                headers: { 'Content-Type': 'application/json' }
-            });
-            return response.ok;
-        }
-        
-        // For other fields, call backend to check
-        const response = await fetch(`${BACKEND_URL}/api/user-check`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ field, value })
-        });
-        
-        const data = await response.json();
-        return response.ok && data.exists;
-    } catch (error) {
-        console.error("Error checking user existence:", error);
-        throw error;
-    }
+  try {
+    // Handle field name mapping
+    let firestoreField = field;
+    if (field === 'UserID' || field === 'uid') firestoreField = 'uid';
+    if (field === 'email') firestoreField = 'email';
+    if (field === 'username') firestoreField = 'username';
+
+    const exists = await userExists(firestoreField, value);
+    return exists;
+  } catch (error) {
+    console.error('[AIRTABLE] Error checking user existence:', error);
+    throw error;
+  }
 };
 
+/**
+ * Create a new user in Firestore
+ */
 export const createAirtableUser = async (userData) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/user`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                username: userData.username,
-                email: userData.email,
-                uid: userData.uid
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to create user: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Failed to create Airtable user:", error);
-        throw error;
-    }
+  try {
+    const user = await createUser(userData.uid, {
+      username: userData.username,
+      email: userData.email,
+      tier: userData.tier || 'Free',
+    });
+
+    return user;
+  } catch (error) {
+    console.error('[AIRTABLE] Failed to create user:', error);
+    throw error;
+  }
 };
 
+/**
+ * Get user from Firestore
+ */
 export const getUser = async (uid) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/user/${uid}`, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            if (response.status === 404) {
-                return null;
-            }
-            throw new Error(`Failed to get user: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Failed to get user:", error);
-        throw error;
-    }
-}
+  try {
+    const user = await getUserData(uid);
+    return user;
+  } catch (error) {
+    console.error('[AIRTABLE] Failed to get user:', error);
+    throw error;
+  }
+};
 
 // --- FILE FUNCTIONS ---
 
+/**
+ * Fetch all user files from Firestore
+ */
 export const fetchUserFiles = async (userId) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/files`, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to fetch files: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Failed to fetch files:", error);
-        return [];
-    }
+  try {
+    const files = await getUserFiles(userId);
+    return files;
+  } catch (error) {
+    console.error('[AIRTABLE] Failed to fetch files:', error);
+    return [];
+  }
 };
 
-// Helper function - no longer needed since backend handles record ID internally
+/**
+ * Helper function to get user record ID
+ */
 export const getUserRecordId = async (firebaseUid) => {
-    // This is now handled on the backend
-    // Return the UID itself as it's used by the backend
-    return firebaseUid;
+  return firebaseUid;
 };
 
+/**
+ * Create file record in Firestore
+ */
 export const createFileRecord = async (fileData) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/file`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                userId: fileData.userId,
-                originalName: fileData.originalName,
-                newName: fileData.newName,
-                size: fileData.size,
-                url: fileData.url,
-                userTier: fileData.userTier || 'Sandbox',
-                pageCount: fileData.pageCount || null
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to create file record: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Failed to create file record:", error);
-        throw error;
-    }
+  try {
+    const file = await createFirestoreFileRecord({
+      userId: fileData.userId,
+      originalName: fileData.originalName,
+      newName: fileData.newName,
+      size: fileData.size,
+      url: fileData.url,
+      userTier: fileData.userTier || 'Sandbox',
+      pageCount: fileData.pageCount || 1,
+    });
+
+    return file;
+  } catch (error) {
+    console.error('[AIRTABLE] Failed to create file record:', error);
+    throw error;
+  }
 };
 
 /**
