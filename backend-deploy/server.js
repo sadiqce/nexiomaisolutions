@@ -29,6 +29,9 @@ if (!admin.apps.length) {
         credential: admin.credential.cert(firebaseConfig),
       });
       console.log('[FIREBASE] Admin SDK initialized');
+      console.log(`[FIREBASE] Project ID: ${firebaseConfig.projectId}`);
+      console.log(`[FIREBASE] Client Email: ${firebaseConfig.clientEmail}`);
+      console.log(`[FIREBASE] Private Key Length: ${firebaseConfig.privateKey?.length || 0} chars`);
     }
   } catch (error) {
     console.error('[FIREBASE] Initialization error:', error.message);
@@ -385,7 +388,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
     const files = filesSnapshot.docs.map(doc => {
       const data = doc.data();
       const uploadDate = normalizeDate(data.UploadedAt) || new Date().toISOString();
-      return {
+      const fileRecord = {
         id: doc.id,
         originalName: data.FileName || '',
         newName: data.FileName || '',
@@ -394,6 +397,12 @@ app.get('/api/user/:uid/files', async (req, res) => {
         url: data.URL || '',
         status: data.Status || 'Pending'
       };
+      // Log first file to debug data structure
+      if (files.length === 0) {
+        console.log(`[FILES API] Sample raw Firestore data:`, JSON.stringify(data, null, 2));
+        console.log(`[FILES API] Processed file record:`, fileRecord);
+      }
+      return fileRecord;
     })
     .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
     
@@ -404,6 +413,7 @@ app.get('/api/user/:uid/files', async (req, res) => {
     res.set('Expires', '0');
     
     console.log(`[FILES API] Found ${files.length} files for user ${uid}`);
+    console.log(`[FILES API] File names:`, files.map(f => f.newName).join(', '));
     res.json(files);
   } catch (error) {
     console.error('[FILES API] Error:', error);
