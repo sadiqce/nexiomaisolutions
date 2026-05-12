@@ -24,23 +24,47 @@ export const subscribeToUserFiles = (userId, onUpdate, onError) => {
       where('UserID', '==', userId)
     );
     
-    // Track last update to avoid processing duplicate snapshots
+    // Track state for listener
+    let hasReceivedServerData = false;
+    let lastDocCount = 0;
     let lastUpdateTime = 0;
-    const DUPLICATE_CHECK_TIMEOUT = 100; // ms
+    const DUPLICATE_CHECK_TIMEOUT = 500; // ms
     
-    // Set up real-time listener
+    // Set up real-time listener with metadata tracking
     const unsubscribe = onSnapshot(
       filesQuery,
+      { includeMetadataChanges: true },
       (snapshot) => {
-        // Avoid processing duplicate snapshots in quick succession
         const now = Date.now();
-        if (now - lastUpdateTime < DUPLICATE_CHECK_TIMEOUT && snapshot.docChanges().length === 0) {
-          console.log('[FIRESTORE] Skipping duplicate snapshot');
+        const isFromCache = snapshot.metadata.fromCache;
+        const docCount = snapshot.docs.length;
+        const docChanges = snapshot.docChanges().length;
+        
+        console.log(`[FIRESTORE] Snapshot: fromCache=${isFromCache}, docs=${docCount}, changes=${docChanges}`);
+        
+        // Skip initial cache-only snapshot - wait for first server sync
+        if (!hasReceivedServerData && isFromCache) {
+          console.log('[FIRESTORE] Skipping initial cache snapshot, waiting for server sync...');
           return;
         }
+        
+        // Mark that we've received at least one server snapshot
+        if (!isFromCache) {
+          hasReceivedServerData = true;
+        }
+        
+        // Skip duplicate snapshots too close together with no actual changes
+        if (now - lastUpdateTime < DUPLICATE_CHECK_TIMEOUT) {
+          if (docCount === lastDocCount && docChanges === 0) {
+            console.log('[FIRESTORE] Skipping unchanged duplicate snapshot');
+            return;
+          }
+        }
+        
+        lastDocCount = docCount;
         lastUpdateTime = now;
         
-        console.log('[FIRESTORE] Real-time update received, doc changes:', snapshot.docChanges().length);
+        console.log(`[FIRESTORE] Processing update: ${docCount} files`);
         
         // Map Firestore documents to file objects
         const files = snapshot.docs.map(doc => {
@@ -65,16 +89,18 @@ export const subscribeToUserFiles = (userId, onUpdate, onError) => {
             size: data.FileSize || 0,
             uploadDate: uploadDate,
             url: data.URL || '',
-            status: data.Status || 'Pending'
+            status: data.Status || 'Pending',
+            pageCount: data.PageCount || 0,
           };
         });
         
         // Sort by date descending (newest first)
         files.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
         
-        console.log(`[FIRESTORE] ${files.length} files received for user ${userId}`);
-        console.log('[FIRESTORE] File names:', files.map(f => f.newName).join(', '));
-        console.log('[FIRESTORE] Latest upload date:', files[0]?.uploadDate);
+        console.log(`[FIRESTORE] Returning ${files.length} files:`);
+        files.forEach(f => {
+          console.log(`[FIRESTORE]   - ${f.newName} (${new Date(f.uploadDate).toLocaleString()})`);
+        });
         
         // Callback with updated files
         onUpdate(files);

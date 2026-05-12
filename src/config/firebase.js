@@ -17,3 +17,6 @@ const app = initializeApp(firebaseConfig);
 // 3. Export the Auth and Firestore instances
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Enable Firestore debugging for real-time sync issues
+console.log('[FIREBASE] Firestore initialized');

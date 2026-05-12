@@ -153,19 +153,25 @@ export const updateUserSubscription = async (userId, subscriptionData) => {
  */
 export const getMonthlyUsage = async (userId) => {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/monthly-usage`, {
-            headers: { 'Content-Type': 'application/json' }
+        // Get user files from Firestore
+        const files = await getUserFiles(userId);
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        
+        // Count files from current month
+        const monthlyFiles = files.filter(file => {
+            const uploadDate = new Date(file.uploadDate);
+            return uploadDate.getMonth() === currentMonth && uploadDate.getFullYear() === currentYear;
         });
         
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to get monthly usage: ${data.error}`);
-        }
-        
-        return data;
+        return {
+            monthKey: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`,
+            filesThisMonth: monthlyFiles.length,
+            records: monthlyFiles,
+            tierInfo: null
+        };
     } catch (error) {
-        console.error("Failed to get monthly usage:", error);
+        console.error('[AIRTABLE] Failed to get monthly usage:', error);
         // Return default values on error to avoid breaking the app
         return {
             monthKey: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
@@ -177,25 +183,15 @@ export const getMonthlyUsage = async (userId) => {
 };
 
 /**
- * Get user's top-up credits
+ * Get user's top-up credits - fetches directly from Firestore
  * @param {string} userId - The user's Firebase ID
  * @returns {Promise<number>} Available top-up credits
  */
 export const getTopUpCredits = async (userId) => {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/topup-credits`, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to get top-up credits: ${data.error}`);
-        }
-        
-        return data.credits || 0;
+        return await getFirestoreTopUpCredits(userId);
     } catch (error) {
-        console.error("Failed to get top-up credits:", error);
+        console.error('[AIRTABLE] Failed to get top-up credits:', error);
         return 0;
     }
 };
