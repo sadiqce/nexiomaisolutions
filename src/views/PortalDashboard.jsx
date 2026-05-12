@@ -19,7 +19,6 @@ const BUTTON_DANGER = "bg-red-600 hover:bg-red-700 text-white transition shadow-
 const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, onPaymentSuccess }) => {
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
-    const [refreshTrigger, setRefreshTrigger] = useState(0); // To force re-fetch
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isCanceling, setIsCanceling] = useState(false);
     const [cancelError, setCancelError] = useState('');
@@ -104,7 +103,7 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                 unsubscribeFiles();
             };
         }
-    }, [currentUser, isEmailVerified, refreshTrigger]);
+    }, [currentUser, isEmailVerified]);
 
     // Handle upgrade modal trigger from Header
     useEffect(() => {
@@ -200,8 +199,7 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                 }
             };
             fetchUserData();
-            // Also trigger a refresh of the file list
-            setRefreshTrigger(prev => prev + 1);
+            // Real-time listener will automatically update file list
         }
     };
 
@@ -395,10 +393,8 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
             }
         }
 
-        // E. Refresh List to get the real Airtable record ID and formatting
-        if (successfullyUploadedFiles.length > 0) {
-            setRefreshTrigger(prev => prev + 1);
-        }
+        // Real-time listener will automatically pick up new files from Firestore
+        // No need to manually trigger refresh since subscribeToUserFiles is active
     }, [currentUser, userTier, uploadedFiles]);
 
     const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };

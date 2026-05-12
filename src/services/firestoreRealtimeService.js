@@ -24,11 +24,23 @@ export const subscribeToUserFiles = (userId, onUpdate, onError) => {
       where('UserID', '==', userId)
     );
     
+    // Track last update to avoid processing duplicate snapshots
+    let lastUpdateTime = 0;
+    const DUPLICATE_CHECK_TIMEOUT = 100; // ms
+    
     // Set up real-time listener
     const unsubscribe = onSnapshot(
       filesQuery,
       (snapshot) => {
-        console.log('[FIRESTORE] Real-time update received');
+        // Avoid processing duplicate snapshots in quick succession
+        const now = Date.now();
+        if (now - lastUpdateTime < DUPLICATE_CHECK_TIMEOUT && snapshot.docChanges().length === 0) {
+          console.log('[FIRESTORE] Skipping duplicate snapshot');
+          return;
+        }
+        lastUpdateTime = now;
+        
+        console.log('[FIRESTORE] Real-time update received, doc changes:', snapshot.docChanges().length);
         
         // Map Firestore documents to file objects
         const files = snapshot.docs.map(doc => {
@@ -62,6 +74,7 @@ export const subscribeToUserFiles = (userId, onUpdate, onError) => {
         
         console.log(`[FIRESTORE] ${files.length} files received for user ${userId}`);
         console.log('[FIRESTORE] File names:', files.map(f => f.newName).join(', '));
+        console.log('[FIRESTORE] Latest upload date:', files[0]?.uploadDate);
         
         // Callback with updated files
         onUpdate(files);
