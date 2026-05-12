@@ -2,7 +2,7 @@
 // Uses Stripe Payment Element for embedded checkout (no page redirect)
 // Requires backend server to create payment intents
 
-import { getUser, updateUserSubscription } from './apiClient';
+import { getUser, updateUserSubscription } from './airtableService';
 import { loadStripe } from '@stripe/stripe-js';
 
 // Get Stripe configuration from environment
@@ -339,12 +339,12 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
     
     try {
       const user = await getUser(userId);
-      const currentTier = user?.Tier || 'Sandbox';
+      const currentTier = user?.tier || 'Sandbox';
       const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
       
       if (isUpgradingFromPaid) {
         // Calculate billing end date
-        activationDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
+        activationDate = getBillingEndDate(user?.lastPaymentDate, user?.subscriptionEndDate);
         isDeferred = true;
         console.log(`✓ Deferred billing detected. Subscription will charge on ${activationDate.toISOString()}`);
       }
@@ -504,7 +504,7 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
 
     const user = await getUser(userId);
     const now = new Date();
-    const currentTier = user?.Tier || 'Sandbox';
+    const currentTier = user?.tier || 'Sandbox';
     const isUpgradingFromFree = currentTier === 'Sandbox' || currentTier === 'Free';
     const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
 
@@ -514,7 +514,7 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
       
       const subscriptionData = {
         autoRenewal: true,
-        subscriptionTier: planTier,
+        tier: planTier,
         subscriptionStatus: 'active',
         lastPaymentDate: now.toISOString(),
         subscriptionEndDate: addDays(now, 30).toISOString(),
@@ -535,7 +535,7 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
 
     // Case 2: Paid user upgrading to another paid plan → DEFER
     if (isUpgradingFromPaid) {
-      const billingEndDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
+      const billingEndDate = getBillingEndDate(user?.lastPaymentDate, user?.subscriptionEndDate);
       
       console.log(`✓ Paid user upgrading from ${currentTier} to ${planTier}. Deferring to ${billingEndDate.toISOString()}`);
       console.log(`Current subscription ID: ${user?.StripeSubscriptionId}`);

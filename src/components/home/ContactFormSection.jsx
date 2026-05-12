@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { submitContactForm } from '../../services/apiClient';
+import { apiClient } from '../../services/apiClient';
 
 const ContactFormSection = () => {
     const [loading, setLoading] = useState(false);
@@ -22,7 +22,7 @@ const ContactFormSection = () => {
         setMessage('');
         
         try {
-            await submitContactForm({
+            const response = await apiClient.post('/contact', {
                 name,
                 email,
                 message: messageText

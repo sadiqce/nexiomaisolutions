@@ -1,5 +1,6 @@
-// Backend server for Stripe payments + Firebase + S3 operations
-// Handles payment intents, user management, file operations
+// Backend server for Stripe payments, AWS S3, Airtable contact submissions, and Firebase Firestore
+// Handles: Stripe payment intents & subscriptions, S3 signed URLs for file upload/download, Contact form submissions to Airtable
+// Data operations (users, files) are handled directly by frontend using Firestore
 // Install: npm install express cors dotenv stripe firebase-admin @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 // Run: node server.js
 
@@ -8,7 +9,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import admin from 'firebase-admin';
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 dotenv.config();
@@ -104,99 +105,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Nexiom AI Backend API', version: '1.0.0', status: 'running' });
 });
 
-// ===== FIREBASE USER ENDPOINTS =====
-
-/**
- * GET /api/user/:uid - Get user from Firebase
- */
-app.get('/api/user/:uid', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    const userDoc = await db.collection('users').doc(uid).get();
-    
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    res.json(userDoc.data());
-  } catch (error) {
-    console.error('Error getting user:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/user - Create new user in Firebase
- */
-app.post('/api/user', async (req, res) => {
-  try {
-    const { username, email, uid } = req.body;
-    
-    if (!uid || !email) {
-      return res.status(400).json({ error: 'Missing required fields: uid, email' });
-    }
-
-    const userData = {
-      UserID: uid,
-      Username: username || '',
-      Email: email.toLowerCase(),
-      Tier: 'Sandbox',
-      SubscriptionStatus: 'active',
-      CreatedDate: new Date().toISOString(),
-      UpdatedAt: new Date().toISOString()
-    };
-
-    await db.collection('users').doc(uid).set(userData);
-    res.status(201).json(userData);
-  } catch (error) {
-    console.error('Error creating user:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/check-user-availability - Check if username and email are available
- */
-app.post('/api/check-user-availability', async (req, res) => {
-  try {
-    const { username, email } = req.body;
-    
-    if (!username || !email) {
-      return res.status(400).json({ error: 'username and email are required' });
-    }
-
-    // Check username
-    const usernameSnapshot = await db.collection('users')
-      .where('Username', '==', username)
-      .limit(1)
-      .get();
-    
-    const usernameExists = !usernameSnapshot.empty;
-
-    // Check email
-    const emailSnapshot = await db.collection('users')
-      .where('Email', '==', email.toLowerCase())
-      .limit(1)
-      .get();
-    
-    const emailExists = !emailSnapshot.empty;
-    
-    res.json({
-      username: {
-        exists: usernameExists,
-        message: usernameExists ? 'Username is already taken' : 'Username is available'
-      },
-      email: {
-        exists: emailExists,
-        message: emailExists ? 'Email is already registered' : 'Email is available'
-      },
-      available: !usernameExists && !emailExists
-    });
-  } catch (error) {
-    console.error('Error checking user availability:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// ===== SUBSCRIPTION MANAGEMENT ENDPOINTS (used by payment operations) =====
 
 /**
  * PATCH /api/user/:uid/tier - Update user tier
@@ -332,255 +241,9 @@ app.post('/api/check-pending-activation', async (req, res) => {
   }
 });
 
-// ===== FIREBASE FILES ENDPOINTS =====
+// ===== FILE UPLOAD/DOWNLOAD ENDPOINTS (S3 operations) =====
 
-/**
- * GET /api/user/:uid/files - Get all files for a user (optimized for fast rendering)
- * Query params: ?limit=50 (default 100, max 500)
- */
-app.get('/api/user/:uid/files', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500); // Cap at 500
-    
-    console.log(`[FILES API] Fetching files for user: ${uid} (limit: ${limit})`);
-    
-    // Query files by UserID with limit
-    const filesSnapshot = await db.collection('files')
-      .where('UserID', '==', uid)
-      .limit(limit)
-      .get();
-    
-    // Helper to normalize dates to ISO format
-    const normalizeDate = (dateValue) => {
-      if (!dateValue) return null; // Return null instead of current time
-      
-      // Handle Firestore Timestamp objects
-      if (dateValue.toDate && typeof dateValue.toDate === 'function') {
-        try {
-          return dateValue.toDate().toISOString();
-        } catch (e) {
-          console.warn('[DATE] Firestore Timestamp conversion failed:', e.message);
-        }
-      }
-      
-      // Handle _seconds property (alternative Timestamp format)
-      if (dateValue._seconds) {
-        try {
-          return new Date(dateValue._seconds * 1000).toISOString();
-        } catch (e) {
-          console.warn('[DATE] _seconds conversion failed:', e.message);
-        }
-      }
-      
-      // If already a Date object
-      if (dateValue instanceof Date) {
-        try {
-          return dateValue.toISOString();
-        } catch (e) {
-          console.warn('[DATE] Date conversion failed:', e.message);
-        }
-      }
-      
-      // If ISO string, return as-is
-      if (typeof dateValue === 'string' && dateValue.includes('T')) {
-        return dateValue;
-      }
-      
-      // Parse custom format like "2026-05-09 1:08am"
-      if (typeof dateValue === 'string') {
-        try {
-          const date = new Date(dateValue);
-          if (!isNaN(date.getTime())) return date.toISOString();
-        } catch (e) {
-          console.warn('[DATE] Custom format parsing failed:', e.message);
-        }
-      }
-      
-      // If all parsing fails, log and return null
-      console.warn('[DATE] Unable to parse date:', dateValue);
-      return null;
-    };
-    
-    // Map and sort files - returns only needed fields for faster rendering
-    let loggedSample = false;
-    const files = filesSnapshot.docs.map(doc => {
-      const data = doc.data();
-      const uploadDate = normalizeDate(data.UploadedAt) || new Date().toISOString();
-      const fileRecord = {
-        id: doc.id,
-        originalName: data.FileName || '',
-        newName: data.FileName || '',
-        size: data.FileSize || 0,
-        uploadDate: uploadDate,
-        url: data.URL || '',
-        status: data.Status || 'Pending'
-      };
-      // Log first file to debug data structure
-      if (!loggedSample) {
-        console.log(`[FILES API] Sample raw Firestore data:`, JSON.stringify(data, null, 2));
-        console.log(`[FILES API] Processed file record:`, fileRecord);
-        loggedSample = true;
-      }
-      return fileRecord;
-    })
-    .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
-    
-    // Set cache headers to disable caching for real-time updates
-    // Use no-cache to require revalidation on each request
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    
-    console.log(`[FILES API] Found ${files.length} files for user ${uid}`);
-    console.log(`[FILES API] File names:`, files.map(f => f.newName).join(', '));
-    res.json(files);
-  } catch (error) {
-    console.error('[FILES API] Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
-/**
- * POST /api/file - Create file record in Firebase (after S3 upload)
- */
-app.post('/api/file', async (req, res) => {
-  try {
-    const { userId, originalName, newName, size, url, userTier, pageCount } = req.body;
-    
-    if (!userId || !originalName) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const fileData = {
-      UserID: userId,
-      FileName: newName || originalName,
-      FileSize: size,
-      UploadedAt: new Date().toISOString(),
-      URL: url,
-      Status: 'Pending',
-      PageCount: pageCount || null,
-      UpdatedAt: new Date().toISOString()
-    };
-
-    const fileRef = await db.collection('files').add(fileData);
-    res.status(201).json({ id: fileRef.id, ...fileData });
-  } catch (error) {
-    console.error('Error creating file record:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/user/:uid/monthly-usage - Get monthly usage stats
- */
-app.get('/api/user/:uid/monthly-usage', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    
-    const currentDate = new Date();
-    const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-    const monthEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-    
-    const filesSnapshot = await db.collection('files')
-      .where('UserID', '==', uid)
-      .where('UploadedAt', '>=', monthStart.toISOString())
-      .where('UploadedAt', '<=', monthEnd.toISOString())
-      .get();
-    
-    const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-
-    res.json({
-      monthKey: currentMonth,
-      filesThisMonth: filesSnapshot.size,
-      records: filesSnapshot.docs.map(doc => doc.data()),
-      tierInfo: filesSnapshot.size > 0 ? filesSnapshot.docs[0].data().UserTier : null
-    });
-  } catch (error) {
-    console.error('Error getting monthly usage:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== FIREBASE TOPUP & CONTACT ENDPOINTS =====
-
-/**
- * GET /api/user/:uid/topup-credits - Get user's top-up credits
- */
-app.get('/api/user/:uid/topup-credits', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    const userDoc = await db.collection('users').doc(uid).get();
-    
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    res.json({ credits: userDoc.data().TopUpCredits || 0 });
-  } catch (error) {
-    console.error('Error getting top-up credits:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * PATCH /api/user/:uid/topup-credits - Update top-up credits
- */
-app.patch('/api/user/:uid/topup-credits', async (req, res) => {
-  try {
-    const { uid } = req.params;
-    const { creditsToAdd } = req.body;
-    
-    if (creditsToAdd === undefined) {
-      return res.status(400).json({ error: 'Missing required field: creditsToAdd' });
-    }
-
-    const userDoc = await db.collection('users').doc(uid).get();
-    const currentCredits = userDoc.exists ? (userDoc.data().TopUpCredits || 0) : 0;
-    const newCredits = Math.max(0, currentCredits + creditsToAdd);
-    
-    await db.collection('users').doc(uid).update({
-      TopUpCredits: newCredits,
-      UpdatedAt: new Date().toISOString()
-    });
-
-    const updated = await db.collection('users').doc(uid).get();
-    res.json({ credits: updated.data().TopUpCredits });
-  } catch (error) {
-    console.error('Error updating top-up credits:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/contact - Submit contact form (stores in Firebase)
- */
-app.post('/api/contact', async (req, res) => {
-  try {
-    const { name, email, subject, message } = req.body;
-    
-    if (!name || !email || !subject || !message) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    const contactData = {
-      Name: name,
-      Email: email.toLowerCase(),
-      Subject: subject,
-      Message: message,
-      SubmittedAt: new Date().toISOString(),
-      Status: 'New'
-    };
-
-    const contactRef = await db.collection('contacts').add(contactData);
-    res.status(201).json({ id: contactRef.id, ...contactData });
-  } catch (error) {
-    console.error('Error submitting contact form:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ===== S3 FILE UPLOAD/DOWNLOAD ENDPOINTS =====
 
 /**
  * POST /api/file/upload-url - Get signed URL for file upload
@@ -639,31 +302,6 @@ app.get('/api/file/download-url/:fileKey', async (req, res) => {
     }
   } catch (error) {
     console.error('Error generating download URL:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/file/list - List files in S3 (for debugging)
- */
-app.post('/api/file/list', async (req, res) => {
-  try {
-    const { prefix = 'clients/' } = req.body;
-    
-    const command = new ListObjectsV2Command({
-      Bucket: S3_CONFIG.bucketName,
-      Prefix: prefix,
-      MaxKeys: 100,
-    });
-
-    const response = await s3Client.send(command);
-    
-    res.json({
-      objects: response.Contents || [],
-      count: response.Contents?.length || 0
-    });
-  } catch (error) {
-    console.error('Error listing S3 objects:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -963,6 +601,55 @@ app.post('/api/attach-payment-method-to-subscription', async (req, res) => {
     });
   } catch (error) {
     console.error('Error attaching payment method:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== CONTACT FORM SUBMISSION (Airtable) =====
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+
+    if (!name || !email || !message) {
+      return res.status(400).json({ error: 'Missing required fields: name, email, message' });
+    }
+
+    // Submit to Airtable
+    const airtableResponse = await fetch(
+      `https://api.airtable.com/v0/${process.env.AIRTABLE_BASE_ID}/Contact%20Submissions`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.AIRTABLE_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          records: [
+            {
+              fields: {
+                'Name': name,
+                'Email': email,
+                'Message': message,
+                'Submitted': new Date().toISOString(),
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!airtableResponse.ok) {
+      const error = await airtableResponse.json();
+      console.error('[AIRTABLE] Error:', error);
+      return res.status(500).json({ error: 'Failed to submit contact form to Airtable' });
+    }
+
+    const result = await airtableResponse.json();
+    console.log('[AIRTABLE] Contact form submitted:', result.records[0].id);
+
+    res.json({ success: true, message: 'Contact form submitted successfully' });
+  } catch (error) {
+    console.error('[CONTACT] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });

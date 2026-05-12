@@ -204,7 +204,7 @@ const FileList = ({ files = [] }) => {
             <div className="mb-4">
                 <input
                     type="text"
-                    placeholder="Search by filename or name..."
+                    placeholder="Search by filename..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -223,7 +223,7 @@ const FileList = ({ files = [] }) => {
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead>
                         <tr className="bg-gray-50">
-                            <SortableHeader column="originalName" label="Original Filename" />
+                            <SortableHeader column="originalName" label="Original File Name" />
                             <SortableHeader column="newName" label="New File Name" />
                             <SortableHeader column="size" label="Size" />
                             <SortableHeader column="uploadDate" label="Upload Date" />

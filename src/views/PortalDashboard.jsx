@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getS3UploadUrl, uploadFileToS3, fetchUserFiles, createFileRecord, getUser, getTopUpCredits } from '../services/apiClient';
+import { getS3UploadUrl, uploadFileToS3 } from '../services/apiClient';
+import { getUser, getTopUpCredits, createFileRecord } from '../services/airtableService';
 import { subscribeToUserFiles } from '../services/firestoreRealtimeService';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
 import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';

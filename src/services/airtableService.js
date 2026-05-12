@@ -14,6 +14,7 @@ import {
   createFileRecord as createFirestoreFileRecord,
   submitContactForm as submitFirestoreContactForm,
   getTopUpCredits as getFirestoreTopUpCredits,
+  updateUserSubscription as updateFirestoreUserSubscription,
 } from './firestoreService';
 
 // --- USER FUNCTIONS ---
@@ -129,6 +130,18 @@ export const createFileRecord = async (fileData) => {
     return file;
   } catch (error) {
     console.error('[AIRTABLE] Failed to create file record:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update user subscription in Firestore
+ */
+export const updateUserSubscription = async (userId, subscriptionData) => {
+  try {
+    await updateFirestoreUserSubscription(userId, subscriptionData);
+  } catch (error) {
+    console.error('[AIRTABLE] Failed to update subscription:', error);
     throw error;
   }
 };

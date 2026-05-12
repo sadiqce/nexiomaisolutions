@@ -10,6 +10,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   deleteDoc,
   query,
   where,
@@ -125,6 +126,25 @@ export const userExists = async (field, value) => {
     return !querySnapshot.empty;
   } catch (error) {
     console.error('[FIRESTORE] Error checking user existence:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update user subscription information
+ * @param {string} uid - User ID
+ * @param {Object} subscriptionData - Subscription data to update
+ * @returns {Promise<void>}
+ */
+export const updateUserSubscription = async (uid, subscriptionData) => {
+  try {
+    const userRef = doc(db, 'users', uid);
+    await updateDoc(userRef, {
+      ...subscriptionData,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('[FIRESTORE] Error updating subscription:', error);
     throw error;
   }
 };
