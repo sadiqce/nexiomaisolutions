@@ -186,15 +186,6 @@ export const updateTopUpCredits = async (userId, creditsToAdd) => {
   return result.credits;
 };
 
-// ===== CONTACT FORM =====
-
-export const submitContactForm = async (formData) => {
-  return apiRequest('/api/contact', {
-    method: 'POST',
-    body: JSON.stringify(formData),
-  });
-};
-
 // ===== HELPER: Check user existence =====
 
 export const checkUserExists = async (field, value) => {
