@@ -159,6 +159,18 @@ export const getDownloadUrl = async (fileKey) => {
   }
 };
 
+// ===== CONTACT FORM =====
+
+/**
+ * Submit contact form to backend (writes to Airtable)
+ */
+export const submitContactForm = async (formData) => {
+  return apiRequest('/api/contact', {
+    method: 'POST',
+    body: JSON.stringify(formData),
+  });
+};
+
 // ===== TOP-UP CREDITS =====
 
 export const getTopUpCredits = async (userId) => {
