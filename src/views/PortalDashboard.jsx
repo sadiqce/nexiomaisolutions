@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getS3UploadUrl, uploadFileToS3, fetchUserFiles, createFileRecord, getUser, getTopUpCredits } from '../services/apiClient';
+import { subscribeToUserFiles } from '../services/firestoreRealtimeService';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
 import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';
 import { validateUpload, checkMonthlyLimit, getTierConfig } from '../services/tierLimitService';
@@ -40,14 +41,15 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     const [pendingTier, setPendingTier] = useState(null);
     const [pendingActivationDate, setPendingActivationDate] = useState(null);
 
-    // 1. Fetch User Data and Files on Load + Set up Real-time Polling
+    // 1. Set up real-time Firestore listeners for files and user data
     useEffect(() => {
         if (currentUser && isEmailVerified) {
-            const fetchFiles = async () => {
+            // First, fetch user data once and set up listener if available
+            const setupUserData = async () => {
                 try {
-                    console.log('[FETCH] Fetching data for user:', currentUser.uid);
+                    console.log('[REALTIME] Fetching initial user data for:', currentUser.uid);
                     const user = await getUser(currentUser.uid);
-                    console.log('[FETCH] User data:', user);
+                    console.log('[REALTIME] User data:', user);
                     
                     if (user) {
                         setUserTier(user.Tier);
@@ -56,7 +58,7 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                         setPendingTier(user.PendingTier || null);
                         setPendingActivationDate(user.PendingActivationDate || null);
                         
-                        // Check if pending activation date has been reached (only on initial load)
+                        // Check if pending activation date has been reached
                         if (user.PendingTier && user.PendingActivationDate && new Date(user.PendingActivationDate) <= new Date()) {
                             await checkAndActivatePendingTier(currentUser.uid);
                             const updatedUser = await getUser(currentUser.uid);
@@ -73,32 +75,32 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                         const credits = await getTopUpCredits(currentUser.uid);
                         setTopupCredits(credits || 0);
                     }
-                    
-                    const files = await fetchUserFiles(currentUser.uid);
-                    console.log('[FETCH] Fetched files:', files);
-                    console.log('[FETCH] Files count:', files ? files.length : 0);
-                    console.log('[FETCH] File IDs:', files?.map(f => f.id).join(', '));
-                    setUploadedFiles(files || []);
                 } catch (error) {
-                    console.error('[FETCH] Failed to fetch files:', error);
-                    console.log('[FETCH] Error details:', error.message);
+                    console.error('[REALTIME] Failed to fetch user data:', error);
                 }
             };
-            
-            // Initial fetch
-            fetchFiles();
-            
-            // Set up real-time polling for file updates (every 10 seconds)
-            // This ensures frontend sees new files/updates from other sources (webhooks, admin uploads, etc.)
-            const pollInterval = setInterval(() => {
-                console.log('[POLLING] Fetching file updates at', new Date().toLocaleTimeString());
-                fetchFiles();
-            }, 10000); // 10 seconds for faster updates
-            
-            // Cleanup interval on unmount or when dependencies change
+
+            // Setup user data
+            setupUserData();
+
+            // Set up REAL-TIME listener for files using Firestore
+            console.log('[REALTIME] Setting up Firestore real-time listener for files');
+            const unsubscribeFiles = subscribeToUserFiles(
+                currentUser.uid,
+                (files) => {
+                    console.log('[REALTIME] Files updated:', files.length, 'files');
+                    console.log('[REALTIME] File IDs:', files.map(f => f.id).join(', '));
+                    setUploadedFiles(files);
+                },
+                (error) => {
+                    console.error('[REALTIME] Error listening to files:', error);
+                }
+            );
+
+            // Cleanup listener on unmount or when dependencies change
             return () => {
-                console.log('[POLLING] Clearing polling interval');
-                clearInterval(pollInterval);
+                console.log('[REALTIME] Unsubscribing from file updates');
+                unsubscribeFiles();
             };
         }
     }, [currentUser, isEmailVerified, refreshTrigger]);
@@ -227,27 +229,13 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
         setIsRefreshing(true);
         console.log('[REFRESH] Manual refresh triggered at', new Date().toLocaleTimeString());
         try {
-            const files = await fetchUserFiles(currentUser.uid);
-            console.log('[REFRESH] Fetched files:', files);
-            console.log('[REFRESH] File count:', files?.length || 0);
-            
-            // Deep comparison to detect if data actually changed
+            // Since we're now using real-time listeners, just show current status
             const currentCount = uploadedFiles.length;
-            const newCount = files?.length || 0;
-            
-            if (currentCount !== newCount) {
-                console.log(`[REFRESH] File count changed: ${currentCount} → ${newCount}`);
-                setUploadedFiles(files);
-                setInfo(`File list updated. Found ${newCount} files.`);
-            } else {
-                console.log('[REFRESH] File count unchanged');
-                setInfo(`File list refreshed (${newCount} files found).`);
-            }
-            
-            setTimeout(() => setInfo(''), 3000);
+            setInfo(`✓ Real-time updates active. Currently showing ${currentCount} files.`);
+            console.log(`[REFRESH] Current file count: ${currentCount}`);
         } catch (error) {
-            console.error('[REFRESH] Failed to refresh files:', error);
-            setInfo('Failed to refresh file list. Please try again.');
+            console.error('[REFRESH] Error:', error);
+            setInfo('Unable to refresh. Please try again.');
         } finally {
             setIsRefreshing(false);
         }
