@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { redirectToTopupCheckout, TOPUP_PACKS } from '../../services/paymentService';
-import { getUser } from '../../services/airtableService';
+import { getUser } from '../../services/firestoreOperations';
 
 /**
  * TopupModal - Purchase additional documents

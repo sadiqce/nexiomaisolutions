@@ -1,14 +1,14 @@
 /**
- * Airtable Service - Direct Firestore Operations
- * Data pulling operations now use Firestore directly instead of backend endpoints
- * Payment operations still use backend (see paymentService.js)
+ * Firestore Operations Service
+ * Contains all direct Firestore operations and helper functions
+ * This module provides the core database operations layer
  */
 
 import {
   isUsernameAvailable,
   isEmailAvailable,
   userExists,
-  createUser,
+  createUser as createUserFirestore,
   getUserData,
   getUserFiles,
   createFileRecord as createFirestoreFileRecord,
@@ -20,7 +20,7 @@ import {
 // --- USER FUNCTIONS ---
 
 /**
- * Batch check if username and email are available (pulls directly from Firestore)
+ * Batch check if username and email are available
  */
 export const checkUserAvailability = async (username, email) => {
   try {
@@ -35,13 +35,13 @@ export const checkUserAvailability = async (username, email) => {
       available: usernameAvailable && emailAvailable,
     };
   } catch (error) {
-    console.error('[AIRTABLE] Error checking user availability:', error);
+    console.error('[FIRESTORE] Error checking user availability:', error);
     throw error;
   }
 };
 
 /**
- * Check if user exists by field (pulls from Firestore)
+ * Check if user exists by field
  */
 export const checkUserExists = async (field, value) => {
   try {
@@ -54,7 +54,7 @@ export const checkUserExists = async (field, value) => {
     const exists = await userExists(firestoreField, value);
     return exists;
   } catch (error) {
-    console.error('[AIRTABLE] Error checking user existence:', error);
+    console.error('[FIRESTORE] Error checking user existence:', error);
     throw error;
   }
 };
@@ -62,9 +62,9 @@ export const checkUserExists = async (field, value) => {
 /**
  * Create a new user in Firestore
  */
-export const createAirtableUser = async (userData) => {
+export const createUser = async (userData) => {
   try {
-    const user = await createUser(userData.uid, {
+    const user = await createUserFirestore(userData.uid, {
       username: userData.username,
       email: userData.email,
       tier: userData.tier || 'Free',
@@ -72,7 +72,7 @@ export const createAirtableUser = async (userData) => {
 
     return user;
   } catch (error) {
-    console.error('[AIRTABLE] Failed to create user:', error);
+    console.error('[FIRESTORE] Failed to create user:', error);
     throw error;
   }
 };
@@ -85,7 +85,7 @@ export const getUser = async (uid) => {
     const user = await getUserData(uid);
     return user;
   } catch (error) {
-    console.error('[AIRTABLE] Failed to get user:', error);
+    console.error('[FIRESTORE] Failed to get user:', error);
     throw error;
   }
 };
@@ -100,7 +100,7 @@ export const fetchUserFiles = async (userId) => {
     const files = await getUserFiles(userId);
     return files;
   } catch (error) {
-    console.error('[AIRTABLE] Failed to fetch files:', error);
+    console.error('[FIRESTORE] Failed to fetch files:', error);
     return [];
   }
 };
@@ -129,7 +129,7 @@ export const createFileRecord = async (fileData) => {
 
     return file;
   } catch (error) {
-    console.error('[AIRTABLE] Failed to create file record:', error);
+    console.error('[FIRESTORE] Failed to create file record:', error);
     throw error;
   }
 };
@@ -141,7 +141,7 @@ export const updateUserSubscription = async (userId, subscriptionData) => {
   try {
     await updateFirestoreUserSubscription(userId, subscriptionData);
   } catch (error) {
-    console.error('[AIRTABLE] Failed to update subscription:', error);
+    console.error('[FIRESTORE] Failed to update subscription:', error);
     throw error;
   }
 };
@@ -152,48 +152,48 @@ export const updateUserSubscription = async (userId, subscriptionData) => {
  * @returns {Promise<object>} Monthly usage stats
  */
 export const getMonthlyUsage = async (userId) => {
-    try {
-        // Get user files from Firestore
-        const files = await getUserFiles(userId);
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        
-        // Count files from current month
-        const monthlyFiles = files.filter(file => {
-            const uploadDate = new Date(file.uploadDate);
-            return uploadDate.getMonth() === currentMonth && uploadDate.getFullYear() === currentYear;
-        });
-        
-        return {
-            monthKey: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`,
-            filesThisMonth: monthlyFiles.length,
-            records: monthlyFiles,
-            tierInfo: null
-        };
-    } catch (error) {
-        console.error('[AIRTABLE] Failed to get monthly usage:', error);
-        // Return default values on error to avoid breaking the app
-        return {
-            monthKey: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
-            filesThisMonth: 0,
-            records: [],
-            tierInfo: null
-        };
-    }
+  try {
+    // Get user files from Firestore
+    const files = await getUserFiles(userId);
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    // Count files from current month
+    const monthlyFiles = files.filter(file => {
+      const uploadDate = new Date(file.uploadDate);
+      return uploadDate.getMonth() === currentMonth && uploadDate.getFullYear() === currentYear;
+    });
+    
+    return {
+      monthKey: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`,
+      filesThisMonth: monthlyFiles.length,
+      records: monthlyFiles,
+      tierInfo: null
+    };
+  } catch (error) {
+    console.error('[FIRESTORE] Failed to get monthly usage:', error);
+    // Return default values on error to avoid breaking the app
+    return {
+      monthKey: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
+      filesThisMonth: 0,
+      records: [],
+      tierInfo: null
+    };
+  }
 };
 
 /**
- * Get user's top-up credits - fetches directly from Firestore
+ * Get user's top-up credits
  * @param {string} userId - The user's Firebase ID
  * @returns {Promise<number>} Available top-up credits
  */
 export const getTopUpCredits = async (userId) => {
-    try {
-        return await getFirestoreTopUpCredits(userId);
-    } catch (error) {
-        console.error('[AIRTABLE] Failed to get top-up credits:', error);
-        return 0;
-    }
+  try {
+    return await getFirestoreTopUpCredits(userId);
+  } catch (error) {
+    console.error('[FIRESTORE] Failed to get top-up credits:', error);
+    return 0;
+  }
 };
 
 /**
@@ -203,22 +203,22 @@ export const getTopUpCredits = async (userId) => {
  * @returns {Promise<object>} Updated credits
  */
 export const updateTopUpCredits = async (userId, creditsToAdd) => {
-    try {
-        const response = await fetch(`${BACKEND_URL}/api/user/${userId}/topup-credits`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ creditsToAdd })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(`Failed to update top-up credits: ${data.error}`);
-        }
-        
-        return data;
-    } catch (error) {
-        console.error("Failed to update top-up credits:", error);
-        throw error;
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/user/${userId}/topup-credits`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creditsToAdd })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update top-up credits: ${data.error}`);
     }
+    
+    return data;
+  } catch (error) {
+    console.error('[FIRESTORE] Failed to update top-up credits:', error);
+    throw error;
+  }
 };

@@ -169,28 +169,62 @@ export const getUserFiles = async (userId, limit = 50) => {
       const data = doc.data();
       let uploadDate = new Date().toISOString();
       
+      // Handle UploadedAt - can be Timestamp object or string
       if (data.UploadedAt) {
-        if (data.UploadedAt.toDate) {
+        if (typeof data.UploadedAt.toDate === 'function') {
           uploadDate = data.UploadedAt.toDate().toISOString();
         } else if (typeof data.UploadedAt === 'string') {
           uploadDate = data.UploadedAt;
         }
+      } else if (data.UploadTimestamp) {
+        // Fallback to UploadTimestamp
+        if (typeof data.UploadTimestamp.toDate === 'function') {
+          uploadDate = data.UploadTimestamp.toDate().toISOString();
+        } else if (typeof data.UploadTimestamp === 'string') {
+          uploadDate = data.UploadTimestamp;
+        }
       }
+      
+      // Extract file name with fallback chain
+      const fileName = data.FileName || 
+                       data.NewFileName || 
+                       data.OriginalFileName || 
+                       'Unnamed File';
+      
+      const originalFileName = data.OriginalFileName || 
+                               data.FileName || 
+                               'Unnamed File';
+      
+      // Extract file size with fallback
+      const fileSize = data.FileSize || data.Size || 0;
+      
+      // Extract URL with fallback
+      const fileUrl = data.URL || data.DownloadLink || '';
       
       return {
         id: doc.id,
-        originalName: data.FileName || '',
-        newName: data.FileName || '',
-        size: data.FileSize || 0,
+        originalName: originalFileName,
+        newName: fileName,
+        size: fileSize,
         uploadDate,
-        url: data.URL || '',
+        url: fileUrl,
         status: data.Status || 'Pending',
-        pageCount: data.PageCount || 0,
+        pageCount: data.PageCount || data.Pages || 0,
       };
     });
     
     // Sort by date descending
-    files.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
+    files.sort((a, b) => {
+      const getTime = (dateStr) => {
+        if (!dateStr) return 0;
+        try {
+          return new Date(dateStr).getTime();
+        } catch (e) {
+          return 0;
+        }
+      };
+      return getTime(b.uploadDate) - getTime(a.uploadDate);
+    });
     
     return files.slice(0, limit);
   } catch (error) {
@@ -246,36 +280,6 @@ export const deleteFileRecord = async (fileId) => {
   }
 };
 
-// ===== CONTACT FORM =====
-
-/**
- * Submit a contact form entry
- * @param {Object} formData - {name, email, subject, message}
- * @returns {Promise<Object>} Stored contact record
- */
-export const submitContactForm = async (formData) => {
-  try {
-    const contactRecord = {
-      name: formData.name,
-      email: formData.email,
-      subject: formData.subject || '',
-      message: formData.message,
-      submittedAt: Timestamp.now(),
-      read: false,
-    };
-
-    const newDocRef = doc(collection(db, 'contacts'));
-    await setDoc(newDocRef, contactRecord);
-
-    return {
-      id: newDocRef.id,
-      ...contactRecord,
-    };
-  } catch (error) {
-    console.error('[FIRESTORE] Error submitting contact form:', error);
-    throw error;
-  }
-};
 
 // ===== TOP-UP CREDITS =====
 
@@ -290,6 +294,39 @@ export const getTopUpCredits = async (userId) => {
     return userDoc?.topUpCredits || 0;
   } catch (error) {
     console.error('[FIRESTORE] Error fetching top-up credits:', error);
+    throw error;
+  }
+};
+
+// ===== CONTACT FORM =====
+
+/**
+ * Submit contact form - stores in Firestore
+ * @param {Object} formData - Contact form data
+ * @returns {Promise<Object>} Submitted form record
+ */
+export const submitContactForm = async (formData) => {
+  try {
+    const contactRecord = {
+      name: formData.name || '',
+      email: formData.email || '',
+      subject: formData.subject || '',
+      message: formData.message || '',
+      submittedAt: Timestamp.now(),
+      ip: formData.ip || '',
+      userAgent: formData.userAgent || '',
+      status: 'new',
+    };
+
+    const contactRef = await doc(collection(db, 'contact-forms'));
+    await setDoc(contactRef, contactRecord);
+
+    return {
+      id: contactRef.id,
+      ...contactRecord,
+    };
+  } catch (error) {
+    console.error('[FIRESTORE] Error submitting contact form:', error);
     throw error;
   }
 };

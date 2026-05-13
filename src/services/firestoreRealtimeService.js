@@ -5,117 +5,117 @@
  */
 
 import { db } from '../config/firebase';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDocs } from 'firebase/firestore';
 
 /**
  * Listen to real-time file updates for a user
- * @param {string} userId - User ID to listen for
- * @param {function} onUpdate - Callback when files change (receives array of files)
- * @param {function} onError - Callback for errors
- * @returns {function} Unsubscribe function to stop listening
+ * Fires whenever data changes, instantly reflects in UI
  */
 export const subscribeToUserFiles = (userId, onUpdate, onError) => {
   try {
-    console.log('[FIRESTORE] Setting up real-time listener for user:', userId);
-    
-    // Create query for files by UserID
     const filesQuery = query(
       collection(db, 'files'),
       where('UserID', '==', userId)
     );
     
-    // Track state for listener
-    let hasReceivedServerData = false;
-    let lastDocCount = 0;
-    let lastUpdateTime = 0;
-    const DUPLICATE_CHECK_TIMEOUT = 500; // ms
-    
-    // Set up real-time listener with metadata tracking
-    const unsubscribe = onSnapshot(
-      filesQuery,
-      { includeMetadataChanges: true },
-      (snapshot) => {
-        const now = Date.now();
-        const isFromCache = snapshot.metadata.fromCache;
-        const docCount = snapshot.docs.length;
-        const docChanges = snapshot.docChanges().length;
+    const unsubscribe = onSnapshot(filesQuery, (snapshot) => {
+      console.log('[FIRESTORE] Listener fired - snapshot docs:', snapshot.docs.length);
+      
+      const files = snapshot.docs.map(doc => {
+        const data = doc.data();
         
-        console.log(`[FIRESTORE] Snapshot: fromCache=${isFromCache}, docs=${docCount}, changes=${docChanges}`);
+        console.log('[FIRESTORE] Raw doc data:', {
+          id: doc.id,
+          keys: Object.keys(data),
+          FileName: data.FileName,
+          OriginalFileName: data.OriginalFileName,
+          UploadedAt: data.UploadedAt,
+          data: data
+        });
         
-        // Skip initial cache-only snapshot - wait for first server sync
-        if (!hasReceivedServerData && isFromCache) {
-          console.log('[FIRESTORE] Skipping initial cache snapshot, waiting for server sync...');
-          return;
-        }
+        // Extract file name with fallback chain
+        const fileName = data.FileName || 
+                        data.NewFileName || 
+                        data.OriginalFileName || 
+                        'Unnamed File';
         
-        // Mark that we've received at least one server snapshot
-        if (!isFromCache) {
-          hasReceivedServerData = true;
-        }
+        const originalFileName = data.OriginalFileName || 
+                                 data.FileName || 
+                                 'Unnamed File';
         
-        // Skip duplicate snapshots too close together with no actual changes
-        if (now - lastUpdateTime < DUPLICATE_CHECK_TIMEOUT) {
-          if (docCount === lastDocCount && docChanges === 0) {
-            console.log('[FIRESTORE] Skipping unchanged duplicate snapshot');
-            return;
+        // Handle date parsing - UploadedAt can be Timestamp OR string
+        let uploadDate = new Date().toISOString();
+        if (data.UploadedAt) {
+          if (typeof data.UploadedAt.toDate === 'function') {
+            // Firestore Timestamp object
+            uploadDate = data.UploadedAt.toDate().toISOString();
+          } else if (typeof data.UploadedAt === 'string') {
+            // Already a string - use as-is for display
+            uploadDate = data.UploadedAt;
+          }
+        } else if (data.UploadTimestamp) {
+          // Fallback to UploadTimestamp if UploadedAt doesn't exist
+          if (typeof data.UploadTimestamp.toDate === 'function') {
+            uploadDate = data.UploadTimestamp.toDate().toISOString();
+          } else if (typeof data.UploadTimestamp === 'string') {
+            uploadDate = data.UploadTimestamp;
           }
         }
         
-        lastDocCount = docCount;
-        lastUpdateTime = now;
+        // Extract file size
+        const fileSize = data.FileSize || data.Size || 0;
         
-        console.log(`[FIRESTORE] Processing update: ${docCount} files`);
+        // Extract URL with fallback
+        const fileUrl = data.URL || data.DownloadLink || '';
         
-        // Map Firestore documents to file objects
-        const files = snapshot.docs.map(doc => {
-          const data = doc.data();
-          
-          // Handle Firestore Timestamps
-          let uploadDate = new Date().toISOString();
-          if (data.UploadedAt) {
-            if (data.UploadedAt.toDate) {
-              // Firestore Timestamp object
-              uploadDate = data.UploadedAt.toDate().toISOString();
-            } else if (typeof data.UploadedAt === 'string') {
-              // Already ISO string
-              uploadDate = data.UploadedAt;
-            }
+        // Extract status
+        const status = data.Status || 'Pending';
+        
+        // Extract page count
+        const pageCount = data.PageCount || data.Pages || 0;
+        
+        const fileObj = {
+          id: doc.id,
+          originalName: originalFileName,
+          newName: fileName,
+          size: fileSize,
+          uploadDate,
+          url: fileUrl,
+          status,
+          pageCount,
+        };
+        
+        console.log('[FIRESTORE] Mapped file object:', fileObj);
+        return fileObj;
+      });
+      
+      console.log('[FIRESTORE] Before sort - files:', files.length);
+      files.sort((a, b) => {
+        // Handle date comparison for both ISO strings and custom format
+        const getTime = (dateStr) => {
+          if (!dateStr) return 0;
+          try {
+            return new Date(dateStr).getTime();
+          } catch (e) {
+            console.error('Date parse error:', dateStr);
+            return 0;
           }
-          
-          return {
-            id: doc.id,
-            originalName: data.FileName || '',
-            newName: data.FileName || '',
-            size: data.FileSize || 0,
-            uploadDate: uploadDate,
-            url: data.URL || '',
-            status: data.Status || 'Pending',
-            pageCount: data.PageCount || 0,
-          };
-        });
-        
-        // Sort by date descending (newest first)
-        files.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
-        
-        console.log(`[FIRESTORE] Returning ${files.length} files:`);
-        files.forEach(f => {
-          console.log(`[FIRESTORE]   - ${f.newName} (${new Date(f.uploadDate).toLocaleString()})`);
-        });
-        
-        // Callback with updated files
-        onUpdate(files);
-      },
-      (error) => {
-        console.error('[FIRESTORE] Real-time listener error:', error);
-        if (onError) onError(error);
-      }
-    );
+        };
+        return getTime(b.uploadDate) - getTime(a.uploadDate);
+      });
+      console.log('[FIRESTORE] After sort - files:', files);
+      
+      onUpdate(files);
+    }, (error) => {
+      console.error('[FIRESTORE] Listener error:', error);
+      if (onError) onError(error);
+    });
     
     return unsubscribe;
   } catch (error) {
-    console.error('[FIRESTORE] Failed to setup real-time listener:', error);
+    console.error('[FIRESTORE] Setup error:', error);
     if (onError) onError(error);
-    return () => {}; // Return no-op unsubscribe
+    return () => {};
   }
 };
 
@@ -154,3 +154,49 @@ export const subscribeToUser = (userId, onUpdate, onError) => {
     return () => {};
   }
 };
+
+/**
+ * Diagnostic function to check what data exists in Firestore for a user
+ * @param {string} userId - User ID to diagnose
+ * @returns {Promise<Object>} Diagnostic information about user's files and data
+ */
+export const diagnoseFiestoreData = async (userId) => {
+  try {
+    console.log('[FIRESTORE] Running diagnostics for user:', userId);
+    
+    const filesQuery = query(
+      collection(db, 'files'),
+      where('UserID', '==', userId)
+    );
+    
+    const snapshot = await getDocs(filesQuery);
+    
+    console.log('[FIRESTORE] DIAGNOSTIC: Total files found:', snapshot.docs.length);
+    
+    snapshot.docs.forEach((doc, index) => {
+      const data = doc.data();
+      console.log(`[FIRESTORE] File ${index + 1}:`, {
+        docId: doc.id,
+        fields: Object.keys(data).sort(),
+        FileName: data.FileName,
+        OriginalFileName: data.OriginalFileName,
+        FileSize: data.FileSize,
+        UploadedAt: data.UploadedAt,
+        UploadedAtType: typeof data.UploadedAt,
+        URL: data.URL,
+        Status: data.Status,
+        PageCount: data.PageCount,
+      });
+    });
+    
+    return {
+      userId,
+      filesCount: snapshot.docs.length,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('[FIRESTORE] Diagnostic error:', error);
+    throw error;
+  }
+};
+

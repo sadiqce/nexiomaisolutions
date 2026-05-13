@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { createAirtableUser, checkUserAvailability } from '../services/airtableService';
+import { createUser, checkUserAvailability } from '../services/firestoreOperations';
 
 const CreateAccount = ({ navigate }) => {
     const [formData, setFormData] = useState({
@@ -66,7 +66,7 @@ const CreateAccount = ({ navigate }) => {
                 displayName: formData.username
             });
 
-            await createAirtableUser({
+            await createUser({
                 username: formData.username,
                 email: formData.email,
                 uid: user.uid

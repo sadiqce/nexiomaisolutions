@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { formatFileSize } from '../../utils/formatters';
 import { getDownloadUrl } from '../../services/apiClient';
 
@@ -6,6 +6,12 @@ const FileList = ({ files = [] }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [sortColumn, setSortColumn] = useState('uploadDate');
     const [sortDirection, setSortDirection] = useState('desc');
+    
+    // Monitor files prop
+    useEffect(() => {
+        console.log('[FILELIST] FILES PROP CHANGED:', files.length, 'files');
+        console.log('[FILELIST] Files content:', files);
+    }, [files]);
     
     // Memoized date formatter with robust parsing
     const formatDate = useCallback((dateString) => {

@@ -57,7 +57,7 @@ export const getUser = async (uid) => {
   return apiRequest(`/api/user/${uid}`);
 };
 
-export const createAirtableUser = async (userData) => {
+export const createUser = async (userData) => {
   return apiRequest('/api/user', {
     method: 'POST',
     body: JSON.stringify(userData),
@@ -209,7 +209,7 @@ export const checkUserExists = async (field, value) => {
 
 export default {
   getUser,
-  createAirtableUser,
+  createUser,
   updateUserTier,
   updateUserSubscription,
   fetchUserFiles,

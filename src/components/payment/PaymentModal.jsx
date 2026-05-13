@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { redirectToCheckout, PAYMENT_PLANS } from '../../services/paymentService';
-import { getUser } from '../../services/airtableService';
+import { getUser } from '../../services/firestoreOperations';
 
 /**
  * PaymentModal - Plan upgrade modal

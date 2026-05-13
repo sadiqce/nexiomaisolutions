@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getS3UploadUrl, uploadFileToS3 } from '../services/apiClient';
-import { getUser, getTopUpCredits, createFileRecord } from '../services/airtableService';
-import { subscribeToUserFiles } from '../services/firestoreRealtimeService';
+import { getUser, getTopUpCredits, createFileRecord } from '../services/firestoreOperations';
+import { subscribeToUserFiles, diagnoseFiestoreData } from '../services/firestoreRealtimeService';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
 import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';
 import { validateUpload, checkMonthlyLimit, getTierConfig } from '../services/tierLimitService';
@@ -41,16 +41,21 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     const [pendingTier, setPendingTier] = useState(null);
     const [pendingActivationDate, setPendingActivationDate] = useState(null);
 
-    // 1. Set up real-time Firestore listeners for files and user data
+    // DIAGNOSTIC: Check what data exists in Firestore
     useEffect(() => {
         if (currentUser && isEmailVerified) {
-            // First, fetch user data once and set up listener if available
+            diagnoseFiestoreData(currentUser.uid).catch(err => {
+                console.error('[DASHBOARD] Diagnostic failed:', err);
+            });
+        }
+    }, [currentUser, isEmailVerified]);
+
+    // 1. Set up real-time Firestore listener
+    useEffect(() => {
+        if (currentUser && isEmailVerified) {
             const setupUserData = async () => {
                 try {
-                    console.log('[REALTIME] Fetching initial user data for:', currentUser.uid);
                     const user = await getUser(currentUser.uid);
-                    console.log('[REALTIME] User data:', user);
-                    
                     if (user) {
                         setUserTier(user.Tier);
                         setSubscriptionStatus(user.SubscriptionStatus);
@@ -58,7 +63,6 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                         setPendingTier(user.PendingTier || null);
                         setPendingActivationDate(user.PendingActivationDate || null);
                         
-                        // Check if pending activation date has been reached
                         if (user.PendingTier && user.PendingActivationDate && new Date(user.PendingActivationDate) <= new Date()) {
                             await checkAndActivatePendingTier(currentUser.uid);
                             const updatedUser = await getUser(currentUser.uid);
@@ -71,7 +75,6 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                             }
                         }
 
-                        // Get top-up credits
                         const credits = await getTopUpCredits(currentUser.uid);
                         setTopupCredits(credits || 0);
                     }
@@ -80,30 +83,29 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                 }
             };
 
-            // Setup user data
             setupUserData();
 
-            // Set up REAL-TIME listener for files using Firestore
-            console.log('[REALTIME] Setting up Firestore real-time listener for files');
             const unsubscribeFiles = subscribeToUserFiles(
                 currentUser.uid,
                 (files) => {
-                    console.log('[REALTIME] Files updated:', files.length, 'files');
-                    console.log('[REALTIME] File IDs:', files.map(f => f.id).join(', '));
+                    console.log('[DASHBOARD] Callback fired with files:', files);
+                    console.log('[DASHBOARD] Setting uploadedFiles state to:', files.length, 'files');
+                    console.log('[DASHBOARD] File names:', files.map(f => f.originalName));
                     setUploadedFiles(files);
+                    console.log('[DASHBOARD] State should be set now');
                 },
-                (error) => {
-                    console.error('[REALTIME] Error listening to files:', error);
-                }
+                (error) => console.error('[REALTIME] Error:', error)
             );
 
-            // Cleanup listener on unmount or when dependencies change
-            return () => {
-                console.log('[REALTIME] Unsubscribing from file updates');
-                unsubscribeFiles();
-            };
+            return () => unsubscribeFiles();
         }
     }, [currentUser, isEmailVerified]);
+
+    // Monitor uploadedFiles state changes
+    useEffect(() => {
+        console.log('[DASHBOARD] uploadedFiles STATE CHANGED:', uploadedFiles.length, 'files');
+        console.log('[DASHBOARD] uploadedFiles content:', uploadedFiles);
+    }, [uploadedFiles]);
 
     // Handle upgrade modal trigger from Header
     useEffect(() => {
@@ -226,15 +228,8 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
     // Refresh file list manually
     const handleRefreshFiles = async () => {
         setIsRefreshing(true);
-        console.log('[REFRESH] Manual refresh triggered at', new Date().toLocaleTimeString());
         try {
-            // Since we're now using real-time listeners, just show current status
-            const currentCount = uploadedFiles.length;
-            setInfo(`✓ Real-time updates active. Currently showing ${currentCount} files.`);
-            console.log(`[REFRESH] Current file count: ${currentCount}`);
-        } catch (error) {
-            console.error('[REFRESH] Error:', error);
-            setInfo('Unable to refresh. Please try again.');
+            setInfo(`✓ Real-time updates active. Showing ${uploadedFiles.length} files.`);
         } finally {
             setIsRefreshing(false);
         }
@@ -392,9 +387,6 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                 setInfo(`Files uploaded but processing webhook failed. Check status later.`);
             }
         }
-
-        // Real-time listener will automatically pick up new files from Firestore
-        // No need to manually trigger refresh since subscribeToUserFiles is active
     }, [currentUser, userTier, uploadedFiles]);
 
     const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
@@ -451,13 +443,6 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     >
                         ⬆️ Upload Files
                     </button>
-                    <button 
-                        onClick={handleRefreshFiles}
-                        disabled={isRefreshing}
-                        className={`px-5 py-2 rounded-lg font-semibold text-sm transition shadow-md ${isRefreshing ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-200 text-gray-900 hover:bg-gray-300'}`}
-                    >
-                        🔄 {isRefreshing ? 'Refreshing...' : 'Refresh'}
-                    </button>
                 </div>
 
                 {info && (
@@ -478,7 +463,10 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
                     <p className="text-gray-900 text-lg">Drag & Drop files or Click to Upload</p>
                 </div>
                 
-                <FileList files={uploadedFiles} />
+                {(() => {
+                    console.log('[DASHBOARD RENDER] About to render FileList with', uploadedFiles.length, 'files');
+                    return <FileList files={uploadedFiles} />;
+                })()}
             </div>
             </div>
 

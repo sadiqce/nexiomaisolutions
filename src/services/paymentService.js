@@ -2,7 +2,7 @@
 // Uses Stripe Payment Element for embedded checkout (no page redirect)
 // Requires backend server to create payment intents
 
-import { getUser, updateUserSubscription } from './airtableService';
+import { getUser, updateUserSubscription } from './firestoreOperations';
 import { loadStripe } from '@stripe/stripe-js';
 
 // Get Stripe configuration from environment
@@ -608,7 +608,7 @@ export const activateScheduledPlan = async (userId, user) => {
 
     // Call backend to find the trial subscription and mark it as the new active subscription in Airtable
     // Note: Stripe automatically transitions the trial subscription to 'active' when trial_end is reached
-    const { getUser: getUpdatedUser } = await import('./airtableService');
+    const { getUser: getUpdatedUser } = await import('./firestoreOperations');
     const updatedUser = await getUpdatedUser(userId);
 
     // Move pending tier to active tier
@@ -665,7 +665,7 @@ export const processTopupSuccess = async (userId, topupId) => {
  */
 export const getUserPaymentStatus = async (userId) => {
   try {
-    const { getUser } = await import('./airtableService');
+    const { getUser } = await import('./firestoreOperations');
     const user = await getUser(userId);
     return user ? {
       tier: user.Tier,
@@ -692,7 +692,7 @@ export const getUserPaymentStatus = async (userId) => {
  */
 export const cancelSubscription = async (userId) => {
   try {
-    const { getUser, updateUserSubscription } = await import('./airtableService');
+    const { getUser, updateUserSubscription } = await import('./firestoreOperations');
     
     console.log(`Cancelling subscription for user ${userId}`);
     

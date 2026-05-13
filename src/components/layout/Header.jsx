@@ -9,6 +9,7 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [isCanceling, setIsCanceling] = useState(false);
     const [cancelError, setCancelError] = useState(null);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     // Fetch user tier and subscription status on mount and when currentUser changes
     useEffect(() => {
@@ -19,7 +20,7 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
 
     const fetchUserData = async () => {
         try {
-            const { getUser } = await import('../../services/airtableService');
+            const { getUser } = await import('../../services/firestoreOperations');
             const user = await getUser(currentUser.uid);
             setUserTier(user?.Tier || 'Sandbox');
             setSubscriptionStatus(user?.SubscriptionStatus || 'inactive');
@@ -149,7 +150,22 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                     </a>
                 </nav>
 
-                <div className="flex items-center gap-3 sm:gap-4">
+                {/* Hamburger Menu Button (Mobile) */}
+                <button
+                    onClick={() => setIsMenuOpen(!isMenuOpen)}
+                    className="md:hidden flex items-center justify-center w-10 h-10 rounded-lg hover:bg-gray-100 transition"
+                    aria-label="Toggle menu"
+                >
+                    <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        {isMenuOpen ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                        )}
+                    </svg>
+                </button>
+
+                <div className="hidden md:flex items-center gap-3 sm:gap-4">
                     {!isDashboard && (
                         <a href="#" 
                             onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); }} 
@@ -278,6 +294,58 @@ const Header = ({ navigate, currentPage, signOut, currentUser, getUserTier, onCa
                     )}
                 </div>
             </div>
+
+            {/* Mobile Menu */}
+            {isMenuOpen && (
+                <div className="md:hidden bg-white border-t border-gray-200">
+                    <div className="px-4 py-4 space-y-3">
+                        {!isDashboard && (
+                            <a 
+                                href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('Pricing'); setIsMenuOpen(false); }}
+                                className="block px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition"
+                            >
+                                Pricing
+                            </a>
+                        )}
+                        {!isDashboard && (
+                            <a 
+                                href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('HowItWorks'); setIsMenuOpen(false); }}
+                                className="block px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition"
+                            >
+                                How it Works
+                            </a>
+                        )}
+                        {!isDashboard && (
+                            <a 
+                                href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('TermsOfUse'); setIsMenuOpen(false); }}
+                                className="block px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition"
+                            >
+                                Terms & Limits
+                            </a>
+                        )}
+                        {!isDashboard && (
+                            <a 
+                                href="#" 
+                                onClick={(e) => { e.preventDefault(); navigate('PortalLogin'); setIsMenuOpen(false); }}
+                                className="block px-4 py-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition font-medium"
+                            >
+                                Portal
+                            </a>
+                        )}
+                        {isDashboard && (
+                            <button 
+                                onClick={() => { signOut(); setIsMenuOpen(false); }}
+                                className="w-full px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-lg transition"
+                            >
+                                Sign Out
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
         </header>
     );
 };
