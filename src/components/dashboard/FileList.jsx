@@ -181,13 +181,15 @@ const FileList = ({ files = [] }) => {
             <td className="py-1.5 px-3 text-sm">{typeof file.size === 'number' ? formatFileSize(file.size) : file.size}</td>
             <td className="py-1.5 px-3 text-xs text-gray-600">{formatDate(file.uploadDate)}</td>
             <td className="py-1.5 px-3">
-                {file.url ? (
+                {file.status === 'processed' ? (
                     <button 
                         onClick={() => handleDownload(file)} 
                         className="text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium transition"
                     >
                         Download
                     </button>
+                ) : file.status === 'failed' ? (
+                    <span className="text-red-600 text-xs font-medium cursor-help" title="File processing failed.">✗ Failed</span>
                 ) : (
                     <span className="text-yellow-600 text-xs font-medium cursor-help" title="File is being processed. Refresh the page in a moment.">⏳ Processing</span>
                 )}

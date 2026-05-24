@@ -197,8 +197,8 @@ export const createFileRecord = async (uid, fileData) => {
       FileName: fileData.fileName || '',
       FileSize: fileData.fileSize || 0,
       S3Key: fileData.s3Key || '',
-      URL: fileData.url || '',
-      Status: 'uploaded',
+      URL: '',
+      Status: 'processing',
       UploadedAt: new Date().toISOString(),
       UpdatedAt: new Date().toISOString(),
       ...fileData
