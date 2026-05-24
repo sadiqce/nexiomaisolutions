@@ -201,7 +201,8 @@ const FileList = ({ files = [] }) => {
                prevProps.file.originalName === nextProps.file.originalName &&
                prevProps.file.size === nextProps.file.size &&
                prevProps.file.uploadDate === nextProps.file.uploadDate &&
-               prevProps.file.url === nextProps.file.url;
+               prevProps.file.url === nextProps.file.url &&
+               prevProps.file.status === nextProps.file.status;
     });
     
     FileRow.displayName = 'FileRow';
