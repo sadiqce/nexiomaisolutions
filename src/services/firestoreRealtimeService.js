@@ -68,8 +68,8 @@ export const subscribeToUserFiles = (userId, onUpdate, onError) => {
         // Extract URL with fallback
         const fileUrl = data.URL || data.DownloadLink || '';
         
-        // Extract status
-        const status = data.Status || 'Pending';
+        // Extract status - normalize to lowercase for consistent comparison
+        const status = (data.Status || 'Pending').toLowerCase();
         
         // Extract page count
         const pageCount = data.PageCount || data.Pages || 0;
