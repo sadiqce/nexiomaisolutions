@@ -185,15 +185,12 @@ export const getUserFiles = async (userId, limit = 50) => {
         }
       }
       
-      // Extract file name with fallback chain
-      const fileName = data.FileName || 
-                       data.NewFileName || 
-                       data.OriginalFileName || 
-                       'Unnamed File';
+      // Extract file names
+      // originalFileName is the uploaded filename (never changes)
+      const originalFileName = data.OriginalFileName || '';
       
-      const originalFileName = data.OriginalFileName || 
-                               data.FileName || 
-                               'Unnamed File';
+      // fileName is the processed name from make.com (empty until processed)
+      const fileName = data.FileName || '';
       
       // Extract file size with fallback
       const fileSize = data.FileSize || data.Size || 0;
@@ -242,7 +239,8 @@ export const createFileRecord = async (fileData) => {
   try {
     const fileRecord = {
       UserID: fileData.userId,
-      FileName: fileData.originalName || fileData.newName,
+      OriginalFileName: fileData.originalName,
+      FileName: '',
       FileSize: fileData.size,
       URL: fileData.url,
       PageCount: fileData.pageCount || 1,

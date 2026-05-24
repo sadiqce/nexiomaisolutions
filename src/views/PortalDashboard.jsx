@@ -395,7 +395,15 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
         e.preventDefault(); 
         e.stopPropagation(); 
         setIsDragging(false); 
-        handleFileTransfer(e.dataTransfer.files); 
+        handleFileTransfer(e.dataTransfer.files);
+        // Reset file input for file explorer after drop
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const handleFileInputChange = (e) => {
+        handleFileTransfer(e.target.files);
+        // Reset file input value to allow re-selection of same file
+        if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     if (!isEmailVerified) {
@@ -434,7 +442,7 @@ const PortalDashboard = ({ shouldShowUpgradeModal, setShouldShowUpgradeModal, on
             
             <div className="p-6 rounded-xl bg-white border-2 border-gray-300 shadow-lg hover:shadow-xl transition">
                 <h3 className="text-xl font-bold mb-4 text-gray-900 border-b-2 border-blue-600 pb-3">📁 File Management</h3>
-                <input type="file" ref={fileInputRef} multiple className="hidden" onChange={(e) => handleFileTransfer(e.target.files)} />
+                <input type="file" ref={fileInputRef} multiple className="hidden" onChange={handleFileInputChange} />
                 
                 <div className="mb-3 flex gap-3">
                     <button 
