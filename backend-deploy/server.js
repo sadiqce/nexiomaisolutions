@@ -466,11 +466,10 @@ app.post('/api/create-subscription', async (req, res) => {
 
     const user = userDoc.data();
 
-    // Update user subscription in Firebase
+    // Store pending subscription (not active yet - payment must succeed first)
     const updateData = {
-      SubscriptionStatus: 'active',
-      Tier: planType,
-      SubscriptionStartDate: new Date().toISOString(),
+      PendingTier: planType,
+      PendingSubscriptionStatus: 'pending_payment',
       UpdatedAt: new Date().toISOString()
     };
 
@@ -484,11 +483,59 @@ app.post('/api/create-subscription', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Subscription created for ${planType}`,
+      message: `Subscription pending for ${planType} - awaiting payment confirmation`,
       user: updated.data()
     });
   } catch (error) {
     console.error('Error creating subscription:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Activate pending subscription after payment succeeds
+ * POST /api/activate-subscription
+ */
+app.post('/api/activate-subscription', async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing required field: userId' });
+    }
+
+    // Get user from Firebase
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userDoc.data();
+    if (!user.PendingTier) {
+      return res.status(400).json({ error: 'No pending subscription to activate' });
+    }
+
+    // Activate the pending tier
+    const updateData = {
+      Tier: user.PendingTier,
+      SubscriptionStatus: 'active',
+      SubscriptionStartDate: new Date().toISOString(),
+      PendingTier: null,
+      PendingSubscriptionStatus: null,
+      UpdatedAt: new Date().toISOString()
+    };
+
+    await db.collection('users').doc(userId).update(updateData);
+
+    const updated = await db.collection('users').doc(userId).get();
+
+    res.json({
+      success: true,
+      message: `Subscription activated for ${user.PendingTier} plan`,
+      user: updated.data()
+    });
+  } catch (error) {
+    console.error('Error activating subscription:', error);
     res.status(500).json({ error: error.message });
   }
 });
