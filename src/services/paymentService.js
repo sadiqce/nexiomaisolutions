@@ -362,7 +362,7 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
       body: JSON.stringify({
         userId,
         userEmail,
-        planTier,
+        planType: planTier,
         priceId: plan.stripePriceId,
         clientId: userId,
         activationDate: activationDate ? activationDate.toISOString() : null,
