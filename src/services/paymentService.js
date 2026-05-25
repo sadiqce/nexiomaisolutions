@@ -123,7 +123,7 @@ export const createStripeSubscription = async (planTier, userEmail, userId, stri
       body: JSON.stringify({
         userId,
         userEmail,
-        planTier,
+        planType: planTier,
         priceId: stripePriceId,
         clientId: userId, // Pass client ID for metadata
         paymentMethodId, // Pass payment method from confirmed payment intent
