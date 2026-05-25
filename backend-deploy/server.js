@@ -491,14 +491,11 @@ app.post('/api/create-subscription', async (req, res) => {
         items: [{ price: priceId }],
         payment_settings: {
           save_default_payment_method: 'on_subscription',
-          default_mandate_payment_method: 'on_subscription',
         },
         metadata: {
           userId,
           planType,
         },
-        // Don't send invoice immediately - wait for payment
-        off_session: false,
       });
 
       console.log(`✓ Created Stripe subscription: ${subscription.id}`);
