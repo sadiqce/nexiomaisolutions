@@ -323,7 +323,7 @@ const PaymentModalEmbedded = ({
               ⏳ Pending Upgrade: {pendingTier} Plan
             </p>
             <p className="text-blue-600 text-xs mt-2">
-              Activation scheduled for {new Date(pendingActivationDate).toLocaleDateString()}. You cannot upgrade while a tier change is pending.
+              Activation scheduled for {pendingActivationDate ? new Date(pendingActivationDate).toLocaleDateString() : 'pending'}. You cannot upgrade while a tier change is pending.
             </p>
           </div>
         )}
@@ -452,7 +452,7 @@ const PaymentModalEmbedded = ({
             <p className="text-gray-900 font-semibold mb-2">Pending Tier Activation</p>
             <p className="text-gray-600 text-sm mb-3">You have a tier change pending and cannot upgrade while it's active.</p>
             <p className="text-blue-600 text-xs font-semibold">
-              Your {pendingTier} plan will activate on {new Date(pendingActivationDate).toLocaleDateString()}
+              Your {pendingTier} plan will activate on {pendingActivationDate ? new Date(pendingActivationDate).toLocaleDateString() : 'pending'}
             </p>
           </div>
         ) : canProceed && clientSecret && stripePromise ? (

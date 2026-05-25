@@ -452,7 +452,7 @@ app.post('/api/create-payment-link', async (req, res) => {
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
-    const { userId, planType, paymentMethodId } = req.body;
+    const { userId, planType, paymentMethodId, activationDate } = req.body;
 
     if (!userId || !planType) {
       return res.status(400).json({ error: 'Missing required fields: userId, planType' });
@@ -472,6 +472,11 @@ app.post('/api/create-subscription', async (req, res) => {
       PendingSubscriptionStatus: 'pending_payment',
       UpdatedAt: new Date().toISOString()
     };
+
+    // Store activation date if provided (for deferred billing)
+    if (activationDate) {
+      updateData.PendingActivationDate = activationDate;
+    }
 
     if (paymentMethodId) {
       updateData.PaymentMethodId = paymentMethodId;
