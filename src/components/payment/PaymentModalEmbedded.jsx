@@ -5,7 +5,7 @@ import { getStripe, createPaymentIntentForPlan, processPaymentSuccess, PAYMENT_P
 /**
  * Inner form component that uses Stripe hooks
  */
-const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSuccess, onCancel, onError, currentTier }) => {
+const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSuccess, onCancel, onError, currentTier, isDeferred, deferredActivationDate }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -40,32 +40,34 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
         return;
       }
 
-      // Payment succeeded - now update Airtable
-      if (paymentIntent.status === 'succeeded') {
-        // Get subscription ID from state (stored during createPaymentIntent)
-        // Fallback to paymentIntent.subscription if not in state
-        const actualSubscriptionId = subscriptionId || paymentIntent.subscription;
-        
-        if (!actualSubscriptionId) {
-          setProcessError('Subscription ID not found. Please contact support.');
-          setIsProcessing(false);
-          return;
-        }
-        
-        // Extract payment method ID from the confirmed payment intent
-        const paymentMethodId = paymentIntent.payment_method;
-        
-        // Pass the subscription ID, payment intent ID, payment method ID, and status to processPaymentSuccess
-        const result = await processPaymentSuccess(
-          userId, 
-          selectedPlan, 
-          actualSubscriptionId,
-          paymentIntent.status,
-          paymentIntent.id,
-          paymentMethodId // NEW: Pass the payment method ID
-        );
-        onSuccess?.(result);
-      } else if (paymentIntent.status === 'requires_action') {
+        // Payment succeeded - now activate the subscription
+        if (paymentIntent.status === 'succeeded') {
+          // Get subscription ID from state (stored during createPaymentIntent)
+          // Fallback to paymentIntent.subscription if not in state
+          const actualSubscriptionId = subscriptionId || paymentIntent.subscription;
+          
+          if (!actualSubscriptionId) {
+            setProcessError('Subscription ID not found. Please contact support.');
+            setIsProcessing(false);
+            return;
+          }
+          
+          // Extract payment method ID from the confirmed payment intent
+          const paymentMethodId = paymentIntent.payment_method;
+          
+          // Pass all needed info to activate the subscription
+          const result = await processPaymentSuccess(
+            userId, 
+            selectedPlan, 
+            actualSubscriptionId,
+            paymentIntent.status,
+            paymentIntent.id,
+            paymentMethodId,
+            isDeferred,
+            deferredActivationDate
+          );
+          onSuccess?.(result);
+        } else if (paymentIntent.status === 'requires_action') {
         setProcessError('Additional authentication required');
         setIsProcessing(false);
       }
@@ -466,6 +468,8 @@ const PaymentModalEmbedded = ({
               onCancel={() => onClose(false)}
               onError={handlePaymentError}
               currentTier={currentTier}
+              isDeferred={isDeferred}
+              deferredActivationDate={deferredActivationDate}
             />
           </Elements>
         ) : error ? (

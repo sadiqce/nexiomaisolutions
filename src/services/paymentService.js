@@ -384,7 +384,12 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
       console.log(`✓ Client secret ready for payment confirmation`);
     }
     
-    return result; // Contains: clientSecret (if immediate), subscriptionId, status, isDeferred, etc.
+    // Return all needed info for payment and activation
+    return {
+      ...result,
+      isDeferred,
+      activationDate: activationDate ? activationDate.toISOString() : null,
+    };
   } catch (error) {
     console.error('Error preparing payment:', error);
     throw error;
@@ -503,100 +508,61 @@ export const activateSubscription = async (userId) => {
   }
 };
 
-export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus, paymentIntentId = null, paymentMethodId = null) => {
+export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus, paymentIntentId = null, paymentMethodId = null, isDeferred = false, deferredActivationDate = null) => {
   try {
     if (!userId || !planTier || !subscriptionId) {
       throw new Error('User ID, plan tier, and subscription ID are required');
     }
 
     console.log(`Processing payment success for user ${userId}, subscription ${subscriptionId}`);
+    console.log(`Payment method: ${paymentMethodId ? 'provided' : 'not provided'}`);
 
-    // Attach payment method to subscription if provided
-    // This changes the subscription status from 'incomplete' to 'active'
-    if (paymentMethodId) {
+    // For deferred billing, store as pending and don't activate yet
+    if (isDeferred) {
+      console.log(`✓ Deferred billing - activating on ${deferredActivationDate}`);
+      
       try {
-        console.log(`Attaching payment method to subscription...`);
-        const attachResult = await attachPaymentMethodToSubscription(subscriptionId, paymentMethodId);
-        console.log(`✓ Payment method attached. Subscription status: ${attachResult.status}`);
-      } catch (attachError) {
-        console.error(`⚠ Failed to attach payment method: ${attachError.message}`);
-        // Continue anyway - payment succeeded, we'll still update Airtable
+        const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/store-pending-subscription`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            planTier,
+            subscriptionId,
+            activationDate: deferredActivationDate,
+            stripeSubscriptionStatus: subscriptionStatus,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to store pending subscription');
+        }
+
+        const result = await response.json();
+        console.log(`✓ Deferred subscription stored`, result);
+        
+        return {
+          success: true,
+          message: `Your ${planTier} plan is scheduled to activate on ${new Date(deferredActivationDate).toLocaleDateString()}. Your current plan remains active until then.`,
+        };
+      } catch (error) {
+        console.error('Error storing deferred subscription:', error);
+        throw error;
       }
     }
 
-    // Finalize the subscription to mark it as active
-    // This applies the successful payment to the subscription's invoice
-    if (paymentIntentId) {
-      try {
-        console.log(`Finalizing subscription in Stripe...`);
-        const finalizeResult = await finalizeSubscription(subscriptionId, paymentIntentId);
-        console.log(`Finalization result:`, finalizeResult);
-      } catch (finalizeError) {
-        console.error(`⚠ Failed to finalize subscription: ${finalizeError.message}`);
-        // Continue anyway - payment succeeded, we'll still update Airtable
-      }
-    }
+    // For immediate activation, call the activate endpoint
+    console.log(`✓ Immediate activation`);
+    const activateResult = await activateSubscription(userId);
+    console.log(`✓ Subscription activated immediately`, activateResult);
 
-    const user = await getUser(userId);
-    const now = new Date();
-    const currentTier = user?.tier || 'Sandbox';
-    const isUpgradingFromFree = currentTier === 'Sandbox' || currentTier === 'Free';
-    const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
-
-    // Case 1: Free user upgrading to paid plan → Activate IMMEDIATELY
-    if (isUpgradingFromFree) {
-      console.log(`✓ Free user upgrading to ${planTier}. Activating immediately.`);
-      
-      // Call backend to activate the pending subscription
-      const activateResult = await activateSubscription(userId);
-      console.log(`✓ Subscription activated: ${activateResult.message}`);
-
-      return {
-        success: true,
-        message: `Successfully activated ${planTier} plan!`,
-      };
-    }
-
-    // Case 2: Paid user upgrading to another paid plan → DEFER
-    if (isUpgradingFromPaid) {
-      const billingEndDate = getBillingEndDate(user?.lastPaymentDate, user?.subscriptionEndDate);
-      
-      console.log(`✓ Paid user upgrading from ${currentTier} to ${planTier}. Deferring to ${billingEndDate.toISOString()}`);
-      console.log(`Current subscription ID: ${user?.StripeSubscriptionId}`);
-      console.log(`Pending subscription ID: ${subscriptionId}`);
-      
-      // Do NOT cancel the old Stripe subscription yet
-      // Keep it active so user continues with current plan during trial period
-      // Do NOT overwrite StripeSubscriptionId - keep the current subscription ID
-      // Store pending subscription metadata on the backend side
-      console.log(`✓ Keeping both subscriptions - current active, pending in trial until activation`);
-
-      // Prepare subscription data for the PENDING (future) tier
-      // NOTE: We do NOT update stripeSubscriptionId here - we keep the current active subscription ID
-      // The backend will track which subscription is which via Stripe's metadata
-      const subscriptionData = {
-        autoRenewal: true,
-        subscriptionStatus: 'active', // Current status stays active
-        pendingTier: planTier,
-        pendingActivationDate: billingEndDate.toISOString(),
-        stripeSubscriptionStatus: subscriptionStatus || 'active',
-        // stripeSubscriptionId remains unchanged (still points to current active subscription)
-      };
-
-      await updateUserSubscription(userId, subscriptionData);
-      console.log(`✓ Updated Airtable with pending tier`);
-
-      const daysLeft = Math.max(0, Math.ceil((billingEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-      const daysText = daysLeft === 1 ? '1 day' : `${daysLeft} days`;
-
-      return {
-        success: true,
-        message: `Your ${planTier} plan is scheduled to activate in ${daysText}, on ${billingEndDate.toLocaleDateString()}. Your current plan remains active until then.`,
-      };
-    }
-
-    throw new Error(`Unable to determine upgrade type for tier ${currentTier} to ${planTier}`);
-
+    return {
+      success: true,
+      message: `Successfully upgraded to ${planTier} plan!`,
+    };
   } catch (error) {
     console.error('Error processing payment success:', error);
     throw error;

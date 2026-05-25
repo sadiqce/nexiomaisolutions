@@ -449,47 +449,99 @@ app.post('/api/create-payment-link', async (req, res) => {
 /**
  * Create or update a subscription
  * POST /api/create-subscription
+ * This creates a Stripe subscription and returns the payment intent client secret
+ * Database is NOT updated at this stage - only after payment succeeds
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
-    const { userId, planType, paymentMethodId, activationDate } = req.body;
+    const { userId, planType, userEmail, priceId } = req.body;
 
-    if (!userId || !planType) {
-      return res.status(400).json({ error: 'Missing required fields: userId, planType' });
+    if (!userId || !planType || !userEmail || !priceId) {
+      return res.status(400).json({ error: 'Missing required fields: userId, planType, userEmail, priceId' });
     }
 
-    // Get user from Firebase
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: 'User not found' });
+    // Get or create Stripe customer
+    let stripeCustomer = null;
+    try {
+      const customers = await stripe.customers.list({
+        email: userEmail,
+        limit: 1,
+      });
+      
+      if (customers.data.length > 0) {
+        stripeCustomer = customers.data[0];
+        console.log(`✓ Found existing Stripe customer: ${stripeCustomer.id}`);
+      } else {
+        stripeCustomer = await stripe.customers.create({
+          email: userEmail,
+          metadata: { userId },
+        });
+        console.log(`✓ Created new Stripe customer: ${stripeCustomer.id}`);
+      }
+    } catch (error) {
+      console.error('Error managing Stripe customer:', error);
+      throw new Error(`Failed to create/find Stripe customer: ${error.message}`);
     }
 
-    const user = userDoc.data();
+    // Create Stripe subscription (without payment method - it will be incomplete)
+    let subscription = null;
+    try {
+      subscription = await stripe.subscriptions.create({
+        customer: stripeCustomer.id,
+        items: [{ price: priceId }],
+        payment_settings: {
+          save_default_payment_method: 'on_subscription',
+          default_mandate_payment_method: 'on_subscription',
+        },
+        metadata: {
+          userId,
+          planType,
+        },
+        // Don't send invoice immediately - wait for payment
+        off_session: false,
+      });
 
-    // Store pending subscription (not active yet - payment must succeed first)
-    const updateData = {
-      PendingTier: planType,
-      PendingSubscriptionStatus: 'pending_payment',
-      UpdatedAt: new Date().toISOString()
-    };
-
-    // Store activation date if provided (for deferred billing)
-    if (activationDate) {
-      updateData.PendingActivationDate = activationDate;
+      console.log(`✓ Created Stripe subscription: ${subscription.id}`);
+      console.log(`  Status: ${subscription.status}`);
+      console.log(`  Latest invoice: ${subscription.latest_invoice?.id}`);
+    } catch (error) {
+      console.error('Error creating Stripe subscription:', error);
+      throw new Error(`Failed to create subscription: ${error.message}`);
     }
 
-    if (paymentMethodId) {
-      updateData.PaymentMethodId = paymentMethodId;
+    // Get the payment intent client secret from the latest invoice
+    let clientSecret = null;
+    try {
+      if (subscription.latest_invoice && typeof subscription.latest_invoice === 'object') {
+        const invoice = subscription.latest_invoice;
+        if (invoice.payment_intent && typeof invoice.payment_intent === 'object') {
+          clientSecret = invoice.payment_intent.client_secret;
+          console.log(`✓ Got client secret from invoice payment intent`);
+        }
+      } else if (subscription.latest_invoice) {
+        // Latest invoice is just an ID, fetch it
+        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
+        if (invoice.payment_intent) {
+          const paymentIntent = await stripe.paymentIntents.retrieve(invoice.payment_intent);
+          clientSecret = paymentIntent.client_secret;
+          console.log(`✓ Got client secret from fetched invoice`);
+        }
+      }
+    } catch (error) {
+      console.error('Error getting client secret:', error);
+      throw new Error(`Failed to get payment client secret: ${error.message}`);
     }
 
-    await db.collection('users').doc(userId).update(updateData);
-
-    const updated = await db.collection('users').doc(userId).get();
+    if (!clientSecret) {
+      throw new Error('Could not retrieve payment client secret from subscription');
+    }
 
     res.json({
       success: true,
-      message: `Subscription pending for ${planType} - awaiting payment confirmation`,
-      user: updated.data()
+      subscriptionId: subscription.id,
+      clientSecret,
+      status: subscription.status,
+      message: 'Subscription created - ready for payment',
     });
   } catch (error) {
     console.error('Error creating subscription:', error);
@@ -546,9 +598,54 @@ app.post('/api/activate-subscription', async (req, res) => {
 });
 
 /**
- * Finalize subscription after payment
- * POST /api/finalize-subscription
+ * Store pending subscription for deferred billing
+ * POST /api/store-pending-subscription
  */
+app.post('/api/store-pending-subscription', async (req, res) => {
+  try {
+    const { userId, planTier, subscriptionId, activationDate, stripeSubscriptionStatus } = req.body;
+
+    if (!userId || !planTier || !subscriptionId || !activationDate) {
+      return res.status(400).json({ error: 'Missing required fields: userId, planTier, subscriptionId, activationDate' });
+    }
+
+    // Get user from Firebase
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userDoc.data();
+    console.log(`✓ Storing pending subscription for user ${userId}: ${planTier} activating ${activationDate}`);
+
+    // Store the pending tier information
+    // Keep current tier active, set new tier as pending
+    const updateData = {
+      PendingTier: planTier,
+      PendingActivationDate: activationDate,
+      PendingSubscriptionId: subscriptionId,
+      PendingSubscriptionStatus: stripeSubscriptionStatus || 'active',
+      UpdatedAt: new Date().toISOString()
+    };
+
+    await db.collection('users').doc(userId).update(updateData);
+
+    const updated = await db.collection('users').doc(userId).get();
+
+    console.log(`✓ Pending subscription stored successfully`);
+    res.json({
+      success: true,
+      message: `Pending subscription scheduled for ${new Date(activationDate).toLocaleDateString()}`,
+      user: updated.data()
+    });
+  } catch (error) {
+    console.error('Error storing pending subscription:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Finalize subscription after payment
 app.post('/api/finalize-subscription', async (req, res) => {
   try {
     const { userId, paymentIntentId } = req.body;
