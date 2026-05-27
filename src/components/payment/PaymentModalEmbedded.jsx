@@ -204,6 +204,7 @@ const PaymentModalEmbedded = ({
 }) => {
   const [selectedPlan, setSelectedPlan] = useState(targetPlan);
   const [clientSecret, setClientSecret] = useState('');
+  const [subscriptionId, setSubscriptionId] = useState('');
   const [setupIntentId, setSetupIntentId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [stripePromise, setStripePromise] = useState(null);
@@ -242,6 +243,7 @@ const PaymentModalEmbedded = ({
       setSuccessMessage('');
       setError('');
       setClientSecret('');
+      setSubscriptionId('');
       setSetupIntentId('');
       setCustomerId('');
       setIsDeferred(false);
@@ -281,7 +283,8 @@ const PaymentModalEmbedded = ({
       );
 
       setClientSecret(paymentData.clientSecret || '');
-      setSubscriptionId(paymentData.subscriptionId || '');
+      setSetupIntentId(paymentData.setupIntentId || '');
+      setCustomerId(paymentData.customerId || '');
       setIsDeferred(paymentData.isDeferred || false);
       setDeferredActivationDate(paymentData.activationDate || null);
     } catch (err) {
@@ -505,7 +508,8 @@ const PaymentModalEmbedded = ({
               userId={userId}
               userEmail={userEmail}
               selectedPlan={selectedPlan}
-              subscriptionId={subscriptionId}
+              setupIntentId={setupIntentId}
+              customerId={customerId}
               onSuccess={handlePaymentSuccess}
               onCancel={() => onClose(false)}
               onError={handlePaymentError}
