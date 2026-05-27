@@ -308,7 +308,7 @@ app.get('/api/file/download-url/:fileKey', async (req, res) => {
     try {
       const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
       res.json({ url: signedUrl });
-    } catch (error) {
+    } catch {
       console.error(`File not found: ${decodedKey}`);
       return res.status(404).json({ 
         error: 'File not found in S3',
@@ -402,7 +402,7 @@ app.get('/api/payment-intent/:id', async (req, res) => {
  */
 app.post('/api/create-payment-link', async (req, res) => {
   try {
-    const { amount, currency = 'usd', description, userId, userEmail, type, planTier, topupId, documents } = req.body;
+    const { amount, currency = 'usd', description, userId, userEmail, type, planTier, topupId, documents, interval = 'month' } = req.body;
 
     // Validate required fields
     if (!amount || !userId || !userEmail) {
@@ -432,17 +432,23 @@ app.post('/api/create-payment-link', async (req, res) => {
       if (documents) metadata.documents = documents.toString();
     }
 
+    const priceData = {
+      currency,
+      product_data: {
+        name: description || 'Nexiom AI Service',
+      },
+      unit_amount: Math.round(amount),
+    };
+
+    if (type === 'plan') {
+      priceData.recurring = { interval };
+    }
+
     // Create payment link
     const paymentLink = await stripe.paymentLinks.create({
       line_items: [
         {
-          price_data: {
-            currency: currency,
-            product_data: {
-              name: description || 'Nexiom AI Service',
-            },
-            unit_amount: Math.round(amount),
-          },
+          price_data: priceData,
           quantity: 1,
         },
       ],
@@ -469,7 +475,7 @@ app.post('/api/create-payment-link', async (req, res) => {
  */
 app.post('/api/create-subscription', async (req, res) => {
   try {
-    const { userId, planType, userEmail, priceId } = req.body;
+    const { userId, planType, userEmail, priceId, isDeferred = false, activationDate = null } = req.body;
 
     if (!userId || !planType || !userEmail || !priceId) {
       return res.status(400).json({ error: 'Missing required fields: userId, planType, userEmail, priceId' });
@@ -498,6 +504,55 @@ app.post('/api/create-subscription', async (req, res) => {
       throw new Error(`Failed to create/find Stripe customer: ${error.message}`);
     }
 
+    if (!isDeferred) {
+      let subscription = null;
+      try {
+        subscription = await stripe.subscriptions.create({
+          customer: stripeCustomer.id,
+          items: [{ price: priceId }],
+          payment_behavior: 'default_incomplete',
+          payment_settings: { save_default_payment_method: 'on_subscription' },
+          expand: ['latest_invoice.payment_intent'],
+          metadata: {
+            userId,
+            planType,
+            userEmail,
+          },
+        });
+        console.log(`Created Stripe subscription: ${subscription.id}`);
+      } catch (error) {
+        console.error('Error creating Stripe subscription:', error);
+        throw new Error(`Failed to create subscription: ${error.message}`);
+      }
+
+      const invoice = typeof subscription.latest_invoice === 'string'
+        ? await stripe.invoices.retrieve(subscription.latest_invoice, { expand: ['payment_intent'] })
+        : subscription.latest_invoice;
+      const paymentIntent = typeof invoice?.payment_intent === 'string'
+        ? await stripe.paymentIntents.retrieve(invoice.payment_intent)
+        : invoice?.payment_intent;
+
+      if (!paymentIntent?.client_secret) {
+        throw new Error('Stripe did not return a payment client secret for this subscription');
+      }
+
+      return res.json({
+        success: true,
+        intentType: 'payment',
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+        subscriptionId: subscription.id,
+        customerId: stripeCustomer.id,
+        status: subscription.status,
+        message: 'Ready for subscription payment',
+      });
+    }
+
+    const deferredActivationDate = new Date(activationDate);
+    if (Number.isNaN(deferredActivationDate.getTime()) || deferredActivationDate <= new Date()) {
+      return res.status(400).json({ error: 'A future activationDate is required for deferred subscriptions' });
+    }
+
     // Create SetupIntent to collect payment method
     let setupIntent = null;
     try {
@@ -520,10 +575,13 @@ app.post('/api/create-subscription', async (req, res) => {
 
     res.json({
       success: true,
+      intentType: 'setup',
       clientSecret: setupIntent.client_secret,
       setupIntentId: setupIntent.id,
       customerId: stripeCustomer.id,
       status: 'setup_pending',
+      isDeferred: true,
+      activationDate: deferredActivationDate.toISOString(),
       message: 'Ready for payment method collection',
     });
   } catch (error) {
@@ -538,7 +596,7 @@ app.post('/api/create-subscription', async (req, res) => {
  */
 app.post('/api/activate-subscription', async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, planTier, subscriptionId, stripeSubscriptionStatus = 'active' } = req.body;
 
     if (!userId) {
       return res.status(400).json({ error: 'Missing required field: userId' });
@@ -551,18 +609,28 @@ app.post('/api/activate-subscription', async (req, res) => {
     }
 
     const user = userDoc.data();
-    if (!user.PendingTier) {
-      return res.status(400).json({ error: 'No pending subscription to activate' });
+    const targetTier = planTier || user.PendingTier;
+    const targetSubscriptionId = subscriptionId || user.PendingSubscriptionId;
+    if (!targetTier || !targetSubscriptionId) {
+      return res.status(400).json({ error: 'No subscription details to activate' });
     }
 
     // Activate the pending tier
+    const now = new Date();
     const updateData = {
-      Tier: user.PendingTier,
+      Tier: targetTier,
       SubscriptionStatus: 'active',
-      SubscriptionStartDate: new Date().toISOString(),
+      SubscriptionStartDate: now.toISOString(),
+      LastPaymentDate: now.toISOString(),
+      SubscriptionEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      StripeSubscriptionId: targetSubscriptionId,
+      StripeSubscriptionStatus: stripeSubscriptionStatus,
+      AutoRenewal: true,
       PendingTier: null,
+      PendingActivationDate: null,
+      PendingSubscriptionId: null,
       PendingSubscriptionStatus: null,
-      UpdatedAt: new Date().toISOString()
+      UpdatedAt: now.toISOString()
     };
 
     await db.collection('users').doc(userId).update(updateData);
@@ -571,7 +639,7 @@ app.post('/api/activate-subscription', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Subscription activated for ${user.PendingTier} plan`,
+      message: `Subscription activated for ${targetTier} plan`,
       user: updated.data()
     });
   } catch (error) {
@@ -587,7 +655,7 @@ app.post('/api/activate-subscription', async (req, res) => {
  */
 app.post('/api/confirm-subscription-payment', async (req, res) => {
   try {
-    const { setupIntentId, customerId, userId, planType, priceId } = req.body;
+    const { setupIntentId, customerId, userId, planType, priceId, isDeferred = false, activationDate = null } = req.body;
 
     if (!setupIntentId || !customerId || !userId || !planType || !priceId) {
       return res.status(400).json({ error: 'Missing required fields: setupIntentId, customerId, userId, planType, priceId' });
@@ -633,14 +701,32 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
     // Now create the subscription with the payment method
     let subscription = null;
     try {
-      subscription = await stripe.subscriptions.create({
+      const subscriptionParams = {
         customer: customerId,
         items: [{ price: priceId }],
+        default_payment_method: paymentMethodId,
+        payment_settings: { save_default_payment_method: 'on_subscription' },
         metadata: {
           userId,
           planType,
           setupIntentId,
         },
+      };
+
+      if (isDeferred) {
+        const deferredActivationDate = new Date(activationDate);
+        if (Number.isNaN(deferredActivationDate.getTime()) || deferredActivationDate <= new Date()) {
+          return res.status(400).json({ error: 'A future activationDate is required for deferred subscriptions' });
+        }
+        subscriptionParams.trial_end = Math.floor(deferredActivationDate.getTime() / 1000);
+        subscriptionParams.metadata.activationDate = deferredActivationDate.toISOString();
+      } else {
+        subscriptionParams.payment_behavior = 'default_incomplete';
+        subscriptionParams.expand = ['latest_invoice.payment_intent'];
+      }
+
+      subscription = await stripe.subscriptions.create({
+        ...subscriptionParams,
       });
       console.log(`✓ Created Stripe subscription: ${subscription.id}`);
       console.log(`  Status: ${subscription.status}`);
@@ -653,9 +739,13 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
     let clientSecret = null;
     try {
       if (subscription.latest_invoice) {
-        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
+        const invoice = typeof subscription.latest_invoice === 'string'
+          ? await stripe.invoices.retrieve(subscription.latest_invoice)
+          : subscription.latest_invoice;
         if (invoice.payment_intent) {
-          const paymentIntent = await stripe.paymentIntents.retrieve(invoice.payment_intent);
+          const paymentIntent = typeof invoice.payment_intent === 'string'
+            ? await stripe.paymentIntents.retrieve(invoice.payment_intent)
+            : invoice.payment_intent;
           clientSecret = paymentIntent.client_secret;
           console.log(`✓ Got clientSecret from subscription invoice`);
         }
@@ -670,6 +760,8 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
       subscriptionId: subscription.id,
       clientSecret,
       status: subscription.status,
+      isDeferred,
+      activationDate: isDeferred ? new Date(activationDate).toISOString() : null,
       message: 'Subscription created and ready for payment confirmation',
     });
   } catch (error) {
@@ -679,6 +771,9 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
 });
 
 /**
+ * Store a deferred subscription that will activate later
+ * POST /api/store-pending-subscription
+ */
 app.post('/api/store-pending-subscription', async (req, res) => {
   try {
     const { userId, planTier, subscriptionId, activationDate, stripeSubscriptionStatus } = req.body;
@@ -693,7 +788,11 @@ app.post('/api/store-pending-subscription', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const user = userDoc.data();
+    const pendingActivationDate = new Date(activationDate);
+    if (Number.isNaN(pendingActivationDate.getTime()) || pendingActivationDate <= new Date()) {
+      return res.status(400).json({ error: 'activationDate must be a future date' });
+    }
+
     console.log(`✓ Storing pending subscription for user ${userId}: ${planTier} activating ${activationDate}`);
 
     // Store the pending tier information
@@ -724,18 +823,29 @@ app.post('/api/store-pending-subscription', async (req, res) => {
 
 /**
  * Finalize subscription after payment
+ */
 app.post('/api/finalize-subscription', async (req, res) => {
   try {
-    const { userId, paymentIntentId } = req.body;
+    const { userId: requestUserId, subscriptionId, paymentIntentId } = req.body;
 
-    if (!userId || !paymentIntentId) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: 'Missing required field: paymentIntentId' });
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
     if (paymentIntent.status !== 'succeeded') {
       return res.status(400).json({ error: 'Payment not successful' });
+    }
+
+    let subscription = null;
+    if (subscriptionId) {
+      subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    }
+
+    const userId = requestUserId || paymentIntent.metadata?.userId || subscription?.metadata?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: 'Missing userId and unable to derive it from Stripe metadata' });
     }
 
     // Get user from Firebase
@@ -745,15 +855,20 @@ app.post('/api/finalize-subscription', async (req, res) => {
     }
 
     const user = userDoc.data();
-    const planTier = paymentIntent.metadata?.planTier || user.Tier;
+    const planTier = paymentIntent.metadata?.planTier || subscription?.metadata?.planType || user.Tier;
+    const now = new Date();
 
     // Update user subscription in Firebase
     await db.collection('users').doc(userId).update({
       SubscriptionStatus: 'active',
       Tier: planTier,
-      LastPaymentDate: new Date().toISOString(),
-      SubscriptionStartDate: new Date().toISOString(),
-      UpdatedAt: new Date().toISOString()
+      LastPaymentDate: now.toISOString(),
+      SubscriptionStartDate: now.toISOString(),
+      SubscriptionEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      StripeSubscriptionId: subscriptionId || null,
+      StripeSubscriptionStatus: subscription?.status || 'active',
+      AutoRenewal: true,
+      UpdatedAt: now.toISOString()
     });
 
     const updated = await db.collection('users').doc(userId).get();
@@ -775,26 +890,55 @@ app.post('/api/finalize-subscription', async (req, res) => {
  */
 app.post('/api/cancel-subscription', async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, subscriptionId } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
+    if (!userId && !subscriptionId) {
+      return res.status(400).json({ error: 'userId or subscriptionId is required' });
     }
 
-    await db.collection('users').doc(userId).update({
-      SubscriptionStatus: 'cancelled',
-      PendingTier: null,
-      PendingActivationDate: null,
-      SubscriptionEndDate: new Date().toISOString(),
-      UpdatedAt: new Date().toISOString()
-    });
+    let user = null;
+    if (userId) {
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      user = userDoc.data();
+    }
 
-    const updated = await db.collection('users').doc(userId).get();
+    const targetSubscriptionId = subscriptionId || user?.PendingSubscriptionId || user?.StripeSubscriptionId;
+    let stripeSubscription = null;
+    if (targetSubscriptionId) {
+      try {
+        stripeSubscription = await stripe.subscriptions.cancel(targetSubscriptionId);
+      } catch (stripeError) {
+        if (stripeError.code !== 'resource_missing') {
+          throw stripeError;
+        }
+        console.warn(`Stripe subscription not found while cancelling: ${targetSubscriptionId}`);
+      }
+    }
+
+    let updated = null;
+    if (userId) {
+      await db.collection('users').doc(userId).update({
+        SubscriptionStatus: 'cancelled',
+        PendingTier: null,
+        PendingActivationDate: null,
+        PendingSubscriptionId: null,
+        PendingSubscriptionStatus: null,
+        SubscriptionEndDate: new Date().toISOString(),
+        StripeSubscriptionStatus: stripeSubscription?.status || 'cancelled',
+        UpdatedAt: new Date().toISOString()
+      });
+
+      updated = await db.collection('users').doc(userId).get();
+    }
 
     res.json({
       success: true,
       message: 'Subscription cancelled',
-      user: updated.data()
+      status: stripeSubscription?.status || 'cancelled',
+      user: updated?.data() || null
     });
   } catch (error) {
     console.error('Error cancelling subscription:', error);
@@ -808,10 +952,18 @@ app.post('/api/cancel-subscription', async (req, res) => {
  */
 app.post('/api/attach-payment-method-to-subscription', async (req, res) => {
   try {
-    const { userId, paymentMethodId } = req.body;
+    let { userId, subscriptionId, paymentMethodId } = req.body;
 
-    if (!userId || !paymentMethodId) {
-      return res.status(400).json({ error: 'Missing required fields: userId, paymentMethodId' });
+    if (!paymentMethodId || (!userId && !subscriptionId)) {
+      return res.status(400).json({ error: 'Missing required fields: paymentMethodId and either userId or subscriptionId' });
+    }
+
+    if (!userId && subscriptionId) {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      userId = subscription.metadata?.userId;
+      if (!userId) {
+        return res.status(400).json({ error: 'Unable to derive userId from subscription metadata' });
+      }
     }
 
     await db.collection('users').doc(userId).update({

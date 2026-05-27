@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { redirectToTopupCheckout, TOPUP_PACKS } from '../../services/paymentService';
-import { getUser } from '../../services/firestoreOperations';
 
 /**
  * TopupModal - Purchase additional documents
  * Redirects to Stripe Payment Link when user clicks Buy
  */
-const TopupModal = ({ isOpen, onClose, userId, userEmail, currentTopupCredits = 0 }) => {
+const TopupModal = ({ isOpen, onClose, userId, userEmail, currentTopupCredits, currentCredits = 0 }) => {
   const [selectedTopup, setSelectedTopup] = useState('topup-20');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -14,6 +13,7 @@ const TopupModal = ({ isOpen, onClose, userId, userEmail, currentTopupCredits = 
   if (!isOpen) return null;
 
   const topupDetails = TOPUP_PACKS[selectedTopup];
+  const availableCredits = currentTopupCredits ?? currentCredits;
   const displayPrice = `$${(topupDetails.amount / 100).toFixed(2)}`;
 
   const handlePurchase = async () => {
@@ -53,7 +53,7 @@ const TopupModal = ({ isOpen, onClose, userId, userEmail, currentTopupCredits = 
         {/* Current Credits */}
         <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
           <p className="text-gray-600 text-sm mb-2">Your Current Credits</p>
-          <h3 className="text-3xl font-bold text-blue-700">{currentTopupCredits}</h3>
+          <h3 className="text-3xl font-bold text-blue-700">{availableCredits}</h3>
           <p className="text-gray-500 text-xs mt-1">documents available</p>
         </div>
 
@@ -105,7 +105,7 @@ const TopupModal = ({ isOpen, onClose, userId, userEmail, currentTopupCredits = 
               <div className="flex justify-between items-center">
                 <span className="text-gray-900 font-bold">New Total:</span>
                 <span className="text-blue-700 text-lg font-bold">
-                  {currentTopupCredits + topupDetails.documents}
+                  {availableCredits + topupDetails.documents}
                 </span>
               </div>
             </div>

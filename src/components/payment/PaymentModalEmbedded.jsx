@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { getStripe, createPaymentIntentForPlan, processPaymentSuccess, PAYMENT_PLANS } from '../../services/paymentService';
+import { getStripe, getPaymentBackendUrl, createPaymentIntentForPlan, processPaymentSuccess, PAYMENT_PLANS } from '../../services/paymentService';
 
 /**
  * Inner form component that uses Stripe hooks
  */
-const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerId, onSuccess, onCancel, onError, currentTier, isDeferred, deferredActivationDate }) => {
+const PaymentForm = ({ userId, selectedPlan, intentType, subscriptionId, setupIntentId, customerId, onSuccess, onCancel, onError, isDeferred, deferredActivationDate }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -23,90 +23,111 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerI
     setIsProcessing(true);
 
     try {
-      console.log(`Confirming payment setup...`);
-      
-      // Step 1: Confirm the SetupIntent to attach payment method
-      const { error, setupIntent } = await stripe.confirmSetup({
-        elements,
-        confirmParams: {
-          return_url: `${window.location.origin}?setup_success=true`,
-        },
-        redirect: 'if_required',
-      });
-
-      if (error) {
-        setProcessError(error.message || 'Payment setup failed');
-        setIsProcessing(false);
-        onError?.(error);
-        return;
-      }
-
-      if (setupIntent.status !== 'succeeded') {
-        setProcessError(`Setup failed with status: ${setupIntent.status}`);
-        setIsProcessing(false);
-        return;
-      }
-
-      console.log(`✓ Payment method confirmed`);
-
-      // Step 2: Call backend to create subscription with the confirmed payment method
       const plan = PAYMENT_PLANS[selectedPlan];
       if (!plan?.stripePriceId) {
         throw new Error(`Stripe price ID not found for ${selectedPlan}`);
       }
 
-      console.log(`Creating subscription with confirmed payment method...`);
-      
-      const confirmResponse = await fetch(`${process.env.VITE_BACKEND_URL || 'http://localhost:3001'}/api/confirm-subscription-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          setupIntentId,
-          customerId,
-          userId,
-          planType: selectedPlan,
-          priceId: plan.stripePriceId,
-        }),
-      });
+      let paymentIntentId = null;
+      let paymentMethodId = null;
+      let subscriptionData = {
+        subscriptionId,
+        status: 'active',
+      };
 
-      if (!confirmResponse.ok) {
-        const error = await confirmResponse.json();
-        throw new Error(error.error || 'Failed to confirm subscription');
-      }
+      if (intentType === 'setup') {
+        console.log('Confirming payment method setup...');
 
-      const subscriptionData = await confirmResponse.json();
-      console.log(`✓ Subscription created: ${subscriptionData.subscriptionId}`);
-
-      // Step 3: If subscription has a clientSecret, confirm its payment
-      if (subscriptionData.clientSecret && subscriptionData.status === 'incomplete') {
-        console.log(`Confirming subscription payment...`);
-        const { error: paymentError, paymentIntent } = await stripe.confirmPayment({
+        const { error, setupIntent } = await stripe.confirmSetup({
           elements,
-          clientSecret: subscriptionData.clientSecret,
+          confirmParams: {
+            return_url: `${window.location.origin}?setup_success=true`,
+          },
+          redirect: 'if_required',
+        });
+
+        if (error) {
+          setProcessError(error.message || 'Payment setup failed');
+          setIsProcessing(false);
+          onError?.(error);
+          return;
+        }
+
+        if (setupIntent.status !== 'succeeded') {
+          setProcessError(`Setup failed with status: ${setupIntent.status}`);
+          setIsProcessing(false);
+          return;
+        }
+
+        paymentMethodId = setupIntent.payment_method || null;
+        console.log('Payment method confirmed');
+
+        const confirmResponse = await fetch(`${getPaymentBackendUrl()}/api/confirm-subscription-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            setupIntentId,
+            customerId,
+            userId,
+            planType: selectedPlan,
+            priceId: plan.stripePriceId,
+            isDeferred,
+            activationDate: deferredActivationDate,
+          }),
+        });
+
+        if (!confirmResponse.ok) {
+          const error = await confirmResponse.json();
+          throw new Error(error.error || 'Failed to confirm subscription');
+        }
+
+        subscriptionData = await confirmResponse.json();
+        console.log(`Subscription created: ${subscriptionData.subscriptionId}`);
+      } else {
+        if (!subscriptionId) {
+          throw new Error('Subscription was not created by the payment setup.');
+        }
+
+        console.log('Confirming subscription payment...');
+
+        const { error, paymentIntent } = await stripe.confirmPayment({
+          elements,
           confirmParams: {
             return_url: `${window.location.origin}?payment_success=true`,
           },
           redirect: 'if_required',
         });
 
-        if (paymentError) {
-          setProcessError(paymentError.message || 'Payment failed');
+        if (error) {
+          setProcessError(error.message || 'Payment failed');
           setIsProcessing(false);
-          onError?.(paymentError);
+          onError?.(error);
           return;
         }
 
-        console.log(`✓ Subscription payment confirmed`);
+        if (paymentIntent && !['succeeded', 'processing'].includes(paymentIntent.status)) {
+          setProcessError(`Payment ended with status: ${paymentIntent.status}`);
+          setIsProcessing(false);
+          return;
+        }
+
+        paymentIntentId = paymentIntent?.id || null;
+        paymentMethodId = paymentIntent?.payment_method || null;
+        subscriptionData.status = paymentIntent?.status === 'processing' ? 'processing' : 'active';
+        console.log('Subscription payment confirmed');
       }
 
-      // Step 4: Activate the subscription in the database
+      if (!subscriptionData.subscriptionId) {
+        throw new Error('Subscription ID was not returned by the backend.');
+      }
+
       const result = await processPaymentSuccess(
         userId, 
         selectedPlan, 
         subscriptionData.subscriptionId,
         subscriptionData.status,
-        null,
-        null,
+        paymentIntentId,
+        paymentMethodId,
         isDeferred,
         deferredActivationDate
       );
@@ -121,6 +142,7 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerI
 
   const plan = PAYMENT_PLANS[selectedPlan];
   const displayPrice = `$${(plan.amount / 100).toFixed(2)}`;
+  const submitLabel = isDeferred ? 'Schedule Plan' : `Pay ${displayPrice}`;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -141,6 +163,12 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerI
           </div>
         </div>
       </div>
+
+      {isDeferred && deferredActivationDate && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-lg text-sm">
+          Your {selectedPlan} plan will activate on {new Date(deferredActivationDate).toLocaleDateString()}. Your card is saved now and charged on the activation date.
+        </div>
+      )}
 
       {/* Stripe Payment Element */}
       <div className="bg-white p-4 rounded-lg border border-gray-200">
@@ -177,7 +205,7 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerI
           disabled={!stripe || isProcessing}
           className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white font-semibold transition"
         >
-          {isProcessing ? 'Processing...' : `Pay ${displayPrice}`}
+          {isProcessing ? 'Processing...' : submitLabel}
         </button>
       </div>
 
@@ -207,6 +235,7 @@ const PaymentModalEmbedded = ({
   const [subscriptionId, setSubscriptionId] = useState('');
   const [setupIntentId, setSetupIntentId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [intentType, setIntentType] = useState('payment');
   const [stripePromise, setStripePromise] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -246,6 +275,7 @@ const PaymentModalEmbedded = ({
       setSubscriptionId('');
       setSetupIntentId('');
       setCustomerId('');
+      setIntentType('payment');
       setIsDeferred(false);
       setDeferredActivationDate(null);
     }
@@ -265,7 +295,7 @@ const PaymentModalEmbedded = ({
       setStripePromise(stripe);
     } catch (err) {
       console.error('Failed to initialize Stripe:', err);
-      setError('Failed to load payment form. Please refresh and try again.');
+      setError(err.message || 'Failed to load payment form. Please refresh and try again.');
     }
   };
 
@@ -278,13 +308,24 @@ const PaymentModalEmbedded = ({
         throw new Error('User information not available');
       }
 
-      const paymentData = await import('../../services/paymentService').then(m =>
-        m.createPaymentIntentForPlan(selectedPlan, userEmail, userId)
-      );
+      const paymentData = await createPaymentIntentForPlan(selectedPlan, userEmail, userId);
+      const nextIntentType = paymentData.intentType || (paymentData.setupIntentId ? 'setup' : 'payment');
+
+      if (!paymentData.clientSecret) {
+        throw new Error('Payment setup did not return a client secret.');
+      }
+      if (nextIntentType === 'payment' && !paymentData.subscriptionId) {
+        throw new Error('Payment setup did not return a subscription ID.');
+      }
+      if (nextIntentType === 'setup' && (!paymentData.setupIntentId || !paymentData.customerId)) {
+        throw new Error('Payment setup did not return setup details.');
+      }
 
       setClientSecret(paymentData.clientSecret || '');
+      setSubscriptionId(paymentData.subscriptionId || '');
       setSetupIntentId(paymentData.setupIntentId || '');
       setCustomerId(paymentData.customerId || '');
+      setIntentType(nextIntentType);
       setIsDeferred(paymentData.isDeferred || false);
       setDeferredActivationDate(paymentData.activationDate || null);
     } catch (err) {
@@ -292,25 +333,6 @@ const PaymentModalEmbedded = ({
       console.error('Payment intent error:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDeferredPaymentSuccess = async (paymentData) => {
-    try {
-      // For deferred billing, still need to call processPaymentSuccess to update Airtable
-      const { processPaymentSuccess } = await import('../../services/paymentService');
-      const result = await processPaymentSuccess(
-        userId,
-        selectedPlan,
-        paymentData.subscriptionId,
-        'active',
-        null, // No payment intent for deferred
-        null  // No payment method needed for deferred
-      );
-      handlePaymentSuccess(result);
-    } catch (err) {
-      setError(err.message || 'Failed to process subscription');
-      console.error('Deferred payment error:', err);
     }
   };
 
@@ -329,7 +351,6 @@ const PaymentModalEmbedded = ({
   if (!isOpen) return null;
 
   const planDetails = PAYMENT_PLANS[selectedPlan];
-  const displayPrice = `$${(planDetails.amount / 100).toFixed(2)}/mo`;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -452,40 +473,9 @@ const PaymentModalEmbedded = ({
             <p className="text-gray-600 text-sm">
               {isDeferred 
                 ? `Your ${selectedPlan} plan has been scheduled. It will activate on ${new Date(deferredActivationDate).toLocaleDateString()}.`
-                : 'Your plan has been upgraded and Airtable has been updated.'
+                : 'Your plan has been upgraded.'
               }
             </p>
-          </div>
-        ) : isDeferred && !isOnVolume && !hasPendingTier ? (
-          <div>
-            <div className="text-center py-8 bg-amber-50 border border-amber-200 rounded-lg mb-6">
-              <div className="text-amber-600 text-4xl mb-4">⏳</div>
-              <p className="text-gray-900 font-semibold mb-2">Deferred Activation</p>
-              <p className="text-gray-600 text-sm mb-3">
-                Your {selectedPlan} plan will activate on <strong>{new Date(deferredActivationDate).toLocaleDateString()}</strong>
-              </p>
-              <p className="text-amber-600 text-xs mb-3">
-                No payment is required now. You will be charged on the activation date.
-              </p>
-              <p className="text-gray-600 text-sm">
-                Your current plan remains active until then.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => onClose(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-gray-900 hover:bg-gray-50 transition font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDeferredPaymentSuccess({ subscriptionId, isDeferred })}
-                disabled={loading}
-                className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white font-semibold transition"
-              >
-                {loading ? 'Processing...' : 'Confirm Schedule'}
-              </button>
-            </div>
           </div>
         ) : isOnVolume ? (
           <div className="text-center py-8 bg-green-50 border border-green-200 rounded-lg">
@@ -506,14 +496,14 @@ const PaymentModalEmbedded = ({
           <Elements stripe={stripePromise} options={{ clientSecret }}>
             <PaymentForm
               userId={userId}
-              userEmail={userEmail}
               selectedPlan={selectedPlan}
+              intentType={intentType}
+              subscriptionId={subscriptionId}
               setupIntentId={setupIntentId}
               customerId={customerId}
               onSuccess={handlePaymentSuccess}
               onCancel={() => onClose(false)}
               onError={handlePaymentError}
-              currentTier={currentTier}
               isDeferred={isDeferred}
               deferredActivationDate={deferredActivationDate}
             />
@@ -523,7 +513,10 @@ const PaymentModalEmbedded = ({
             <p className="font-semibold mb-2">Error</p>
             <p>{error}</p>
             <button
-              onClick={createPaymentIntent}
+              onClick={() => {
+                createPaymentIntent();
+                initializeStripe();
+              }}
               className="mt-3 w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-semibold"
             >
               Retry

@@ -13,15 +13,27 @@ const STRIPE_CONFIG = {
 
 let stripePromise = null;
 
+export const getPaymentBackendUrl = () => STRIPE_CONFIG.backendUrl;
+
 /**
  * Get Stripe instance (lazy load)
  * @returns {Promise<Stripe>} Stripe instance
  */
 export const getStripe = async () => {
-  if (!stripePromise && STRIPE_CONFIG.publishableKey) {
+  if (!STRIPE_CONFIG.publishableKey) {
+    throw new Error('Stripe publishable key is not configured. Set VITE_STRIPE_PUBLISHABLE_KEY and rebuild the app.');
+  }
+
+  if (!stripePromise) {
     stripePromise = loadStripe(STRIPE_CONFIG.publishableKey);
   }
-  return stripePromise;
+
+  const stripe = await stripePromise;
+  if (!stripe) {
+    throw new Error('Stripe failed to initialize. Please refresh and try again.');
+  }
+
+  return stripe;
 };
 
 /**
@@ -287,17 +299,17 @@ export const PAYMENT_PLANS = {
 };
 
 export const TOPUP_PACKS = {
-  'topup-50': {
+  'topup-20': {
     label: '50 documents',
     amount: 2000, // $20.00 in cents
     documents: 50,
   },
-  'topup-100': {
+  'topup-35': {
     label: '100 documents',
     amount: 3500, // $35.00 in cents
     documents: 100,
   },
-  'topup-250': {
+  'topup-80': {
     label: '250 documents',
     amount: 8000, // $80.00 in cents
     documents: 250,
@@ -345,8 +357,10 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
       if (isUpgradingFromPaid) {
         // Calculate billing end date
         activationDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
-        isDeferred = true;
-        console.log(`✓ Deferred billing detected. Subscription will charge on ${activationDate.toISOString()}`);
+        isDeferred = !!activationDate && activationDate > new Date();
+        if (isDeferred) {
+          console.log(`Deferred billing detected. Subscription will charge on ${activationDate.toISOString()}`);
+        }
       }
     } catch (userFetchError) {
       console.warn(`⚠ Could not fetch user tier, proceeding without deferred billing: ${userFetchError.message}`);
@@ -365,6 +379,8 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
         planType: planTier,
         priceId: plan.stripePriceId,
         clientId: userId,
+        isDeferred,
+        activationDate: activationDate ? activationDate.toISOString() : null,
       }),
     });
 
@@ -374,14 +390,18 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
     }
 
     const result = await response.json();
-    console.log(`✓ SetupIntent created: ${result.setupIntentId}`);
-    console.log(`✓ Ready to collect payment method`);
+    if (!result.clientSecret) {
+      throw new Error('Payment setup did not return a client secret.');
+    }
+
+    console.log(`Payment setup created: ${result.intentType || 'payment'}`);
+    console.log('Ready to collect payment details');
     
     // Return all needed info for payment and activation
     return {
       ...result,
-      isDeferred,
-      activationDate: activationDate ? activationDate.toISOString() : null,
+      isDeferred: Boolean(result.isDeferred ?? isDeferred),
+      activationDate: result.activationDate || (activationDate ? activationDate.toISOString() : null),
     };
   } catch (error) {
     console.error('Error preparing payment:', error);
@@ -471,10 +491,10 @@ const getBillingEndDate = (lastPaymentDate, explicitEndDate) => {
  * @param {string} userId - User ID
  * @returns {Promise<object>} Activation result
  */
-export const activateSubscription = async (userId) => {
+export const activateSubscription = async (userId, planTier, subscriptionId, subscriptionStatus = 'active') => {
   try {
-    if (!userId) {
-      throw new Error('User ID is required');
+    if (!userId || !planTier || !subscriptionId) {
+      throw new Error('User ID, plan tier, and subscription ID are required');
     }
 
     console.log(`Activating subscription for user ${userId}...`);
@@ -484,7 +504,12 @@ export const activateSubscription = async (userId) => {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({
+        userId,
+        planTier,
+        subscriptionId,
+        stripeSubscriptionStatus: subscriptionStatus,
+      }),
     });
 
     if (!response.ok) {
@@ -508,6 +533,7 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
     }
 
     console.log(`Processing payment success for user ${userId}, subscription ${subscriptionId}`);
+    console.log(`Payment intent: ${paymentIntentId || 'not provided'}`);
     console.log(`Payment method: ${paymentMethodId ? 'provided' : 'not provided'}`);
 
     // For deferred billing, store as pending and don't activate yet
@@ -549,7 +575,7 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
 
     // For immediate activation, call the activate endpoint
     console.log(`✓ Immediate activation`);
-    const activateResult = await activateSubscription(userId);
+    const activateResult = await activateSubscription(userId, planTier, subscriptionId, subscriptionStatus);
     console.log(`✓ Subscription activated immediately`, activateResult);
 
     return {
@@ -588,11 +614,6 @@ export const activateScheduledPlan = async (userId, user) => {
         // Continue anyway - the important thing is updating Airtable
       }
     }
-
-    // Call backend to find the trial subscription and mark it as the new active subscription in Firestore
-    // Note: Stripe automatically transitions the trial subscription to 'active' when trial_end is reached
-    const { getUser: getUpdatedUser } = await import('./firestoreOperations');
-    const updatedUser = await getUpdatedUser(userId);
 
     // Move pending tier to active tier
     const subscriptionData = {
