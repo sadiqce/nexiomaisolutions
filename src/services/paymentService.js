@@ -390,7 +390,8 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
     }
 
     const result = await response.json();
-    if (!result.clientSecret) {
+    const isComplete = result.intentType === 'complete' || (result.subscriptionId && ['active', 'trialing'].includes(result.status));
+    if (!result.clientSecret && !isComplete) {
       throw new Error('Payment setup did not return a client secret.');
     }
 

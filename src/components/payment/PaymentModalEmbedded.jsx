@@ -310,15 +310,31 @@ const PaymentModalEmbedded = ({
 
       const paymentData = await createPaymentIntentForPlan(selectedPlan, userEmail, userId);
       const nextIntentType = paymentData.intentType || (paymentData.setupIntentId ? 'setup' : 'payment');
+      const isComplete = nextIntentType === 'complete' || (paymentData.subscriptionId && ['active', 'trialing'].includes(paymentData.status));
 
-      if (!paymentData.clientSecret) {
+      if (!paymentData.clientSecret && !isComplete) {
         throw new Error('Payment setup did not return a client secret.');
       }
-      if (nextIntentType === 'payment' && !paymentData.subscriptionId) {
+      if ((nextIntentType === 'payment' || isComplete) && !paymentData.subscriptionId) {
         throw new Error('Payment setup did not return a subscription ID.');
       }
       if (nextIntentType === 'setup' && (!paymentData.setupIntentId || !paymentData.customerId)) {
         throw new Error('Payment setup did not return setup details.');
+      }
+
+      if (isComplete) {
+        const result = await processPaymentSuccess(
+          userId,
+          selectedPlan,
+          paymentData.subscriptionId,
+          paymentData.status || 'active',
+          paymentData.paymentIntentId || null,
+          null,
+          false,
+          null
+        );
+        handlePaymentSuccess(result);
+        return;
       }
 
       setClientSecret(paymentData.clientSecret || '');

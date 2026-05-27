@@ -95,6 +95,56 @@ const s3Client = new S3Client({
   },
 });
 
+const getSubscriptionPaymentIntent = async (subscription) => {
+  const invoice = typeof subscription.latest_invoice === 'string'
+    ? await stripe.invoices.retrieve(subscription.latest_invoice, { expand: ['payment_intent'] })
+    : subscription.latest_invoice;
+
+  const paymentIntent = typeof invoice?.payment_intent === 'string'
+    ? await stripe.paymentIntents.retrieve(invoice.payment_intent)
+    : invoice?.payment_intent;
+
+  return { invoice, paymentIntent };
+};
+
+const buildSubscriptionPaymentResponse = async (subscription, customerId, message = 'Ready for subscription payment') => {
+  const { invoice, paymentIntent } = await getSubscriptionPaymentIntent(subscription);
+
+  if (paymentIntent?.client_secret) {
+    return {
+      success: true,
+      intentType: 'payment',
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      subscriptionId: subscription.id,
+      customerId,
+      status: subscription.status,
+      invoiceStatus: invoice?.status || null,
+      message,
+    };
+  }
+
+  if (['active', 'trialing'].includes(subscription.status) || invoice?.status === 'paid') {
+    return {
+      success: true,
+      intentType: 'complete',
+      clientSecret: null,
+      paymentIntentId: paymentIntent?.id || null,
+      subscriptionId: subscription.id,
+      customerId,
+      status: subscription.status,
+      invoiceStatus: invoice?.status || null,
+      message: 'Subscription is already active',
+    };
+  }
+
+  throw new Error(
+    `Stripe did not return a payment client secret for this subscription. ` +
+    `Subscription status: ${subscription.status}; invoice status: ${invoice?.status || 'none'}; ` +
+    `payment intent status: ${paymentIntent?.status || 'none'}`
+  );
+};
+
 // ===== HEALTH & ROOT ENDPOINTS =====
 
 app.get('/health', (req, res) => {
@@ -505,6 +555,30 @@ app.post('/api/create-subscription', async (req, res) => {
     }
 
     if (!isDeferred) {
+      const existingSubscriptions = await stripe.subscriptions.list({
+        customer: stripeCustomer.id,
+        status: 'all',
+        limit: 100,
+        expand: ['data.latest_invoice.payment_intent'],
+      });
+
+      const reusableSubscription = existingSubscriptions.data.find((subscription) => {
+        const hasMatchingPrice = subscription.items.data.some((item) => item.price?.id === priceId);
+        const isUsableStatus = ['active', 'trialing', 'incomplete', 'past_due'].includes(subscription.status);
+        const isSameFlow = subscription.metadata?.userId === userId || subscription.metadata?.planType === planType;
+        return hasMatchingPrice && isUsableStatus && isSameFlow;
+      });
+
+      if (reusableSubscription) {
+        console.log(`Reusing existing Stripe subscription: ${reusableSubscription.id}`);
+        const responseData = await buildSubscriptionPaymentResponse(
+          reusableSubscription,
+          stripeCustomer.id,
+          'Existing subscription payment is ready'
+        );
+        return res.json(responseData);
+      }
+
       let subscription = null;
       try {
         subscription = await stripe.subscriptions.create({
@@ -525,27 +599,8 @@ app.post('/api/create-subscription', async (req, res) => {
         throw new Error(`Failed to create subscription: ${error.message}`);
       }
 
-      const invoice = typeof subscription.latest_invoice === 'string'
-        ? await stripe.invoices.retrieve(subscription.latest_invoice, { expand: ['payment_intent'] })
-        : subscription.latest_invoice;
-      const paymentIntent = typeof invoice?.payment_intent === 'string'
-        ? await stripe.paymentIntents.retrieve(invoice.payment_intent)
-        : invoice?.payment_intent;
-
-      if (!paymentIntent?.client_secret) {
-        throw new Error('Stripe did not return a payment client secret for this subscription');
-      }
-
-      return res.json({
-        success: true,
-        intentType: 'payment',
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
-        subscriptionId: subscription.id,
-        customerId: stripeCustomer.id,
-        status: subscription.status,
-        message: 'Ready for subscription payment',
-      });
+      const responseData = await buildSubscriptionPaymentResponse(subscription, stripeCustomer.id);
+      return res.json(responseData);
     }
 
     const deferredActivationDate = new Date(activationDate);
