@@ -339,12 +339,12 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
     
     try {
       const user = await getUser(userId);
-      const currentTier = user?.tier || 'Sandbox';
+      const currentTier = user?.Tier || 'Free';
       const isUpgradingFromPaid = currentTier === 'Standard' || currentTier === 'Volume';
       
       if (isUpgradingFromPaid) {
         // Calculate billing end date
-        activationDate = getBillingEndDate(user?.lastPaymentDate, user?.subscriptionEndDate);
+        activationDate = getBillingEndDate(user?.LastPaymentDate, user?.SubscriptionEndDate);
         isDeferred = true;
         console.log(`✓ Deferred billing detected. Subscription will charge on ${activationDate.toISOString()}`);
       }
@@ -352,8 +352,8 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
       console.warn(`⚠ Could not fetch user tier, proceeding without deferred billing: ${userFetchError.message}`);
     }
 
-    // Call backend to create subscription
-    // Backend will return the subscription with its payment_intent's client_secret
+    // Call backend to create SetupIntent for payment method collection
+    // Backend will return clientSecret from SetupIntent
     const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/create-subscription`, {
       method: 'POST',
       headers: {
@@ -365,8 +365,6 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
         planType: planTier,
         priceId: plan.stripePriceId,
         clientId: userId,
-        activationDate: activationDate ? activationDate.toISOString() : null,
-        isDeferred,
       }),
     });
 
@@ -376,13 +374,8 @@ export const createPaymentIntentForPlan = async (planTier, userEmail, userId) =>
     }
 
     const result = await response.json();
-    console.log(`✓ Subscription created: ${result.subscriptionId}`);
-    
-    if (isDeferred) {
-      console.log(`✓ Deferred subscription: No immediate payment required. Charges on ${activationDate?.toLocaleDateString()}`);
-    } else {
-      console.log(`✓ Client secret ready for payment confirmation`);
-    }
+    console.log(`✓ SetupIntent created: ${result.setupIntentId}`);
+    console.log(`✓ Ready to collect payment method`);
     
     // Return all needed info for payment and activation
     return {
@@ -596,24 +589,24 @@ export const activateScheduledPlan = async (userId, user) => {
       }
     }
 
-    // Call backend to find the trial subscription and mark it as the new active subscription in Airtable
+    // Call backend to find the trial subscription and mark it as the new active subscription in Firestore
     // Note: Stripe automatically transitions the trial subscription to 'active' when trial_end is reached
     const { getUser: getUpdatedUser } = await import('./firestoreOperations');
     const updatedUser = await getUpdatedUser(userId);
 
     // Move pending tier to active tier
     const subscriptionData = {
-      subscriptionTier: user.PendingTier,
-      lastPaymentDate: now.toISOString(),
-      subscriptionEndDate: addDays(now, 30).toISOString(),
-      autoRenewal: true,
-      pendingTier: null,
-      pendingActivationDate: null,
-      // stripeSubscriptionId remains the same - Stripe auto-activated the trial subscription
+      Tier: user.PendingTier,
+      LastPaymentDate: now.toISOString(),
+      SubscriptionEndDate: addDays(now, 30).toISOString(),
+      AutoRenewal: true,
+      PendingTier: null,
+      PendingActivationDate: null,
+      // StripeSubscriptionId remains the same - Stripe auto-activated the trial subscription
       // so it's now the active subscription for this customer
     };
 
-    console.log(`Updating Airtable to activate ${user.PendingTier} plan`);
+    console.log(`Updating Firestore to activate ${user.PendingTier} plan`);
     return await updateUserSubscription(userId, subscriptionData);
   } catch (error) {
     console.error(`Error activating scheduled plan for user ${userId}:`, error);
@@ -632,10 +625,10 @@ export const processTopupSuccess = async (userId, topupId) => {
     const topup = TOPUP_PACKS[topupId];
     if (!topup) throw new Error('Invalid top-up pack');
 
-    // Update top-up credits in Airtable
+    // Update top-up credits in Firestore
     await updateUserSubscription(userId, {
-      topupCreditsAdded: topup.documents,
-      lastTopupDate: new Date().toISOString(),
+      TopUpCredits: topup.documents,
+      LastTopupDate: new Date().toISOString(),
     });
 
     return { 
@@ -649,7 +642,7 @@ export const processTopupSuccess = async (userId, topupId) => {
 };
 
 /**
- * Get payment status for a user (from Airtable)
+ * Get payment status for a user (from Firestore)
  * @param {string} userId - User ID
  * @returns {Promise<object>} User subscription info
  */

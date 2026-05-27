@@ -146,27 +146,42 @@ app.patch('/api/user/:uid/subscription', async (req, res) => {
       UpdatedAt: new Date().toISOString()
     };
     
-    // Map fields
-    if (subscriptionData.subscriptionTier) {
-      updateData.Tier = subscriptionData.subscriptionTier;
+    // Map fields - handles both camelCase (from backend) and PascalCase (from frontend)
+    if (subscriptionData.subscriptionTier || subscriptionData.Tier) {
+      updateData.Tier = subscriptionData.subscriptionTier || subscriptionData.Tier;
     }
-    if (subscriptionData.subscriptionStatus !== undefined) {
-      updateData.SubscriptionStatus = subscriptionData.subscriptionStatus;
+    if (subscriptionData.subscriptionStatus !== undefined || subscriptionData.SubscriptionStatus !== undefined) {
+      updateData.SubscriptionStatus = subscriptionData.subscriptionStatus || subscriptionData.SubscriptionStatus;
     }
-    if ('pendingTier' in subscriptionData) {
-      updateData.PendingTier = subscriptionData.pendingTier;
+    if ('pendingTier' in subscriptionData || 'PendingTier' in subscriptionData) {
+      updateData.PendingTier = subscriptionData.pendingTier !== undefined ? subscriptionData.pendingTier : subscriptionData.PendingTier;
     }
-    if ('pendingActivationDate' in subscriptionData) {
-      updateData.PendingActivationDate = subscriptionData.pendingActivationDate;
+    if ('pendingActivationDate' in subscriptionData || 'PendingActivationDate' in subscriptionData) {
+      updateData.PendingActivationDate = subscriptionData.pendingActivationDate !== undefined ? subscriptionData.pendingActivationDate : subscriptionData.PendingActivationDate;
     }
-    if (subscriptionData.lastPaymentDate) {
-      updateData.LastPaymentDate = subscriptionData.lastPaymentDate;
+    if (subscriptionData.lastPaymentDate || subscriptionData.LastPaymentDate) {
+      updateData.LastPaymentDate = subscriptionData.lastPaymentDate || subscriptionData.LastPaymentDate;
     }
-    if (subscriptionData.stripeSubscriptionId) {
-      updateData.StripeSubscriptionId = subscriptionData.stripeSubscriptionId;
+    if (subscriptionData.subscriptionEndDate || subscriptionData.SubscriptionEndDate) {
+      updateData.SubscriptionEndDate = subscriptionData.subscriptionEndDate || subscriptionData.SubscriptionEndDate;
     }
-    if (subscriptionData.stripeSubscriptionStatus) {
-      updateData.StripeSubscriptionStatus = subscriptionData.stripeSubscriptionStatus;
+    if (subscriptionData.subscriptionStartDate || subscriptionData.SubscriptionStartDate) {
+      updateData.SubscriptionStartDate = subscriptionData.subscriptionStartDate || subscriptionData.SubscriptionStartDate;
+    }
+    if (subscriptionData.stripeSubscriptionId || subscriptionData.StripeSubscriptionId) {
+      updateData.StripeSubscriptionId = subscriptionData.stripeSubscriptionId || subscriptionData.StripeSubscriptionId;
+    }
+    if (subscriptionData.stripeSubscriptionStatus || subscriptionData.StripeSubscriptionStatus) {
+      updateData.StripeSubscriptionStatus = subscriptionData.stripeSubscriptionStatus || subscriptionData.StripeSubscriptionStatus;
+    }
+    if (subscriptionData.autoRenewal !== undefined || subscriptionData.AutoRenewal !== undefined) {
+      updateData.AutoRenewal = subscriptionData.autoRenewal !== undefined ? subscriptionData.autoRenewal : subscriptionData.AutoRenewal;
+    }
+    if (subscriptionData.topupCreditsAdded || subscriptionData.TopUpCredits) {
+      updateData.TopUpCredits = subscriptionData.topupCreditsAdded || subscriptionData.TopUpCredits;
+    }
+    if (subscriptionData.lastTopupDate || subscriptionData.LastTopupDate) {
+      updateData.LastTopupDate = subscriptionData.lastTopupDate || subscriptionData.LastTopupDate;
     }
 
     await db.collection('users').doc(uid).update(updateData);
@@ -449,7 +464,7 @@ app.post('/api/create-payment-link', async (req, res) => {
 /**
  * Create or update a subscription
  * POST /api/create-subscription
- * This creates a Stripe subscription and returns the payment intent client secret
+ * This creates a SetupIntent for payment method collection and returns the client secret
  * Database is NOT updated at this stage - only after payment succeeds
  */
 app.post('/api/create-subscription', async (req, res) => {
@@ -483,62 +498,33 @@ app.post('/api/create-subscription', async (req, res) => {
       throw new Error(`Failed to create/find Stripe customer: ${error.message}`);
     }
 
-    // Create Stripe subscription (without payment method - it will be incomplete)
-    let subscription = null;
+    // Create SetupIntent to collect payment method
+    let setupIntent = null;
     try {
-      subscription = await stripe.subscriptions.create({
+      setupIntent = await stripe.setupIntents.create({
         customer: stripeCustomer.id,
-        items: [{ price: priceId }],
-        payment_settings: {
-          save_default_payment_method: 'on_subscription',
-        },
+        payment_method_types: ['card'],
         metadata: {
           userId,
           planType,
+          priceId,
+          userEmail,
+          subscriptionFlow: 'true',
         },
       });
-
-      console.log(`✓ Created Stripe subscription: ${subscription.id}`);
-      console.log(`  Status: ${subscription.status}`);
-      console.log(`  Latest invoice: ${subscription.latest_invoice?.id}`);
+      console.log(`✓ Created SetupIntent: ${setupIntent.id}`);
     } catch (error) {
-      console.error('Error creating Stripe subscription:', error);
-      throw new Error(`Failed to create subscription: ${error.message}`);
-    }
-
-    // Get the payment intent client secret from the latest invoice
-    let clientSecret = null;
-    try {
-      if (subscription.latest_invoice && typeof subscription.latest_invoice === 'object') {
-        const invoice = subscription.latest_invoice;
-        if (invoice.payment_intent && typeof invoice.payment_intent === 'object') {
-          clientSecret = invoice.payment_intent.client_secret;
-          console.log(`✓ Got client secret from invoice payment intent`);
-        }
-      } else if (subscription.latest_invoice) {
-        // Latest invoice is just an ID, fetch it
-        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
-        if (invoice.payment_intent) {
-          const paymentIntent = await stripe.paymentIntents.retrieve(invoice.payment_intent);
-          clientSecret = paymentIntent.client_secret;
-          console.log(`✓ Got client secret from fetched invoice`);
-        }
-      }
-    } catch (error) {
-      console.error('Error getting client secret:', error);
-      throw new Error(`Failed to get payment client secret: ${error.message}`);
-    }
-
-    if (!clientSecret) {
-      throw new Error('Could not retrieve payment client secret from subscription');
+      console.error('Error creating SetupIntent:', error);
+      throw new Error(`Failed to create payment setup: ${error.message}`);
     }
 
     res.json({
       success: true,
-      subscriptionId: subscription.id,
-      clientSecret,
-      status: subscription.status,
-      message: 'Subscription created - ready for payment',
+      clientSecret: setupIntent.client_secret,
+      setupIntentId: setupIntent.id,
+      customerId: stripeCustomer.id,
+      status: 'setup_pending',
+      message: 'Ready for payment method collection',
     });
   } catch (error) {
     console.error('Error creating subscription:', error);
@@ -595,9 +581,104 @@ app.post('/api/activate-subscription', async (req, res) => {
 });
 
 /**
- * Store pending subscription for deferred billing
- * POST /api/store-pending-subscription
+ * Confirm payment method and create subscription after SetupIntent succeeds
+ * POST /api/confirm-subscription-payment
+ * Called after user confirms payment via SetupIntent
  */
+app.post('/api/confirm-subscription-payment', async (req, res) => {
+  try {
+    const { setupIntentId, customerId, userId, planType, priceId } = req.body;
+
+    if (!setupIntentId || !customerId || !userId || !planType || !priceId) {
+      return res.status(400).json({ error: 'Missing required fields: setupIntentId, customerId, userId, planType, priceId' });
+    }
+
+    console.log(`Processing subscription payment for user ${userId}...`);
+
+    // Verify SetupIntent succeeded
+    let setupIntent = null;
+    try {
+      setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+      console.log(`✓ Retrieved SetupIntent: ${setupIntent.id}, status: ${setupIntent.status}`);
+
+      if (setupIntent.status !== 'succeeded') {
+        return res.status(400).json({ error: `SetupIntent not succeeded. Status: ${setupIntent.status}` });
+      }
+    } catch (error) {
+      console.error('Error retrieving SetupIntent:', error);
+      throw new Error(`Failed to verify payment setup: ${error.message}`);
+    }
+
+    // Get the payment method from the SetupIntent
+    const paymentMethodId = setupIntent.payment_method;
+    if (!paymentMethodId) {
+      throw new Error('No payment method found in SetupIntent');
+    }
+
+    console.log(`✓ Payment method confirmed: ${paymentMethodId}`);
+
+    // Set it as the default payment method for the customer
+    try {
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      });
+      console.log(`✓ Set default payment method for customer`);
+    } catch (error) {
+      console.error('Error setting default payment method:', error);
+      throw new Error(`Failed to set payment method: ${error.message}`);
+    }
+
+    // Now create the subscription with the payment method
+    let subscription = null;
+    try {
+      subscription = await stripe.subscriptions.create({
+        customer: customerId,
+        items: [{ price: priceId }],
+        metadata: {
+          userId,
+          planType,
+          setupIntentId,
+        },
+      });
+      console.log(`✓ Created Stripe subscription: ${subscription.id}`);
+      console.log(`  Status: ${subscription.status}`);
+    } catch (error) {
+      console.error('Error creating subscription:', error);
+      throw new Error(`Failed to create subscription: ${error.message}`);
+    }
+
+    // Get the payment intent client secret from the subscription
+    let clientSecret = null;
+    try {
+      if (subscription.latest_invoice) {
+        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
+        if (invoice.payment_intent) {
+          const paymentIntent = await stripe.paymentIntents.retrieve(invoice.payment_intent);
+          clientSecret = paymentIntent.client_secret;
+          console.log(`✓ Got clientSecret from subscription invoice`);
+        }
+      }
+    } catch (error) {
+      console.error('Error getting clientSecret:', error);
+      // Continue anyway - subscription is created
+    }
+
+    res.json({
+      success: true,
+      subscriptionId: subscription.id,
+      clientSecret,
+      status: subscription.status,
+      message: 'Subscription created and ready for payment confirmation',
+    });
+  } catch (error) {
+    console.error('Error confirming subscription payment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
 app.post('/api/store-pending-subscription', async (req, res) => {
   try {
     const { userId, planTier, subscriptionId, activationDate, stripeSubscriptionStatus } = req.body;

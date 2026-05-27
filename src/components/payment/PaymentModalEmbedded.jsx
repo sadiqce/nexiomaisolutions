@@ -5,7 +5,7 @@ import { getStripe, createPaymentIntentForPlan, processPaymentSuccess, PAYMENT_P
 /**
  * Inner form component that uses Stripe hooks
  */
-const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSuccess, onCancel, onError, currentTier, isDeferred, deferredActivationDate }) => {
+const PaymentForm = ({ userId, userEmail, selectedPlan, setupIntentId, customerId, onSuccess, onCancel, onError, currentTier, isDeferred, deferredActivationDate }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -23,54 +23,94 @@ const PaymentForm = ({ userId, userEmail, selectedPlan, subscriptionId, onSucces
     setIsProcessing(true);
 
     try {
-      // At this point, a subscription is already created via createPaymentIntentForPlan()
-      // We just need to confirm its payment intent
-      const { error, paymentIntent } = await stripe.confirmPayment({
+      console.log(`Confirming payment setup...`);
+      
+      // Step 1: Confirm the SetupIntent to attach payment method
+      const { error, setupIntent } = await stripe.confirmSetup({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}?payment_success=true`,
+          return_url: `${window.location.origin}?setup_success=true`,
         },
         redirect: 'if_required',
       });
 
       if (error) {
-        setProcessError(error.message || 'Payment failed');
+        setProcessError(error.message || 'Payment setup failed');
         setIsProcessing(false);
         onError?.(error);
         return;
       }
 
-        // Payment succeeded - now activate the subscription
-        if (paymentIntent.status === 'succeeded') {
-          // Get subscription ID from state (stored during createPaymentIntent)
-          // Fallback to paymentIntent.subscription if not in state
-          const actualSubscriptionId = subscriptionId || paymentIntent.subscription;
-          
-          if (!actualSubscriptionId) {
-            setProcessError('Subscription ID not found. Please contact support.');
-            setIsProcessing(false);
-            return;
-          }
-          
-          // Extract payment method ID from the confirmed payment intent
-          const paymentMethodId = paymentIntent.payment_method;
-          
-          // Pass all needed info to activate the subscription
-          const result = await processPaymentSuccess(
-            userId, 
-            selectedPlan, 
-            actualSubscriptionId,
-            paymentIntent.status,
-            paymentIntent.id,
-            paymentMethodId,
-            isDeferred,
-            deferredActivationDate
-          );
-          onSuccess?.(result);
-        } else if (paymentIntent.status === 'requires_action') {
-        setProcessError('Additional authentication required');
+      if (setupIntent.status !== 'succeeded') {
+        setProcessError(`Setup failed with status: ${setupIntent.status}`);
         setIsProcessing(false);
+        return;
       }
+
+      console.log(`✓ Payment method confirmed`);
+
+      // Step 2: Call backend to create subscription with the confirmed payment method
+      const plan = PAYMENT_PLANS[selectedPlan];
+      if (!plan?.stripePriceId) {
+        throw new Error(`Stripe price ID not found for ${selectedPlan}`);
+      }
+
+      console.log(`Creating subscription with confirmed payment method...`);
+      
+      const confirmResponse = await fetch(`${process.env.VITE_BACKEND_URL || 'http://localhost:3001'}/api/confirm-subscription-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          setupIntentId,
+          customerId,
+          userId,
+          planType: selectedPlan,
+          priceId: plan.stripePriceId,
+        }),
+      });
+
+      if (!confirmResponse.ok) {
+        const error = await confirmResponse.json();
+        throw new Error(error.error || 'Failed to confirm subscription');
+      }
+
+      const subscriptionData = await confirmResponse.json();
+      console.log(`✓ Subscription created: ${subscriptionData.subscriptionId}`);
+
+      // Step 3: If subscription has a clientSecret, confirm its payment
+      if (subscriptionData.clientSecret && subscriptionData.status === 'incomplete') {
+        console.log(`Confirming subscription payment...`);
+        const { error: paymentError, paymentIntent } = await stripe.confirmPayment({
+          elements,
+          clientSecret: subscriptionData.clientSecret,
+          confirmParams: {
+            return_url: `${window.location.origin}?payment_success=true`,
+          },
+          redirect: 'if_required',
+        });
+
+        if (paymentError) {
+          setProcessError(paymentError.message || 'Payment failed');
+          setIsProcessing(false);
+          onError?.(paymentError);
+          return;
+        }
+
+        console.log(`✓ Subscription payment confirmed`);
+      }
+
+      // Step 4: Activate the subscription in the database
+      const result = await processPaymentSuccess(
+        userId, 
+        selectedPlan, 
+        subscriptionData.subscriptionId,
+        subscriptionData.status,
+        null,
+        null,
+        isDeferred,
+        deferredActivationDate
+      );
+      onSuccess?.(result);
     } catch (err) {
       console.error('Payment error:', err);
       setProcessError(err.message || 'Payment processing failed');
@@ -164,7 +204,8 @@ const PaymentModalEmbedded = ({
 }) => {
   const [selectedPlan, setSelectedPlan] = useState(targetPlan);
   const [clientSecret, setClientSecret] = useState('');
-  const [subscriptionId, setSubscriptionId] = useState('');
+  const [setupIntentId, setSetupIntentId] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [stripePromise, setStripePromise] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -201,7 +242,8 @@ const PaymentModalEmbedded = ({
       setSuccessMessage('');
       setError('');
       setClientSecret('');
-      setSubscriptionId('');
+      setSetupIntentId('');
+      setCustomerId('');
       setIsDeferred(false);
       setDeferredActivationDate(null);
     }

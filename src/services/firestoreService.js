@@ -54,13 +54,13 @@ export const createUser = async (uid, userData) => {
     const userRef = doc(db, 'users', uid);
     const defaultUserData = {
       uid,
-      username: userData.username || '',
-      email: userData.email || '',
-      tier: userData.tier || 'Free',
-      subscriptionStatus: userData.subscriptionStatus || 'inactive',
-      topUpCredits: userData.topUpCredits || 0,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      Username: userData.username || userData.Username || '',
+      Email: userData.email || userData.Email || '',
+      Tier: userData.tier || userData.Tier || 'Free',
+      SubscriptionStatus: userData.subscriptionStatus || userData.SubscriptionStatus || 'inactive',
+      TopUpCredits: userData.topUpCredits || userData.TopUpCredits || 0,
+      CreatedDate: Timestamp.now(),
+      UpdatedAt: Timestamp.now(),
       ...userData,
     };
 
@@ -247,7 +247,6 @@ export const createFileRecord = async (fileData) => {
       Status: 'processing',
       UploadedAt: Timestamp.now(),
       UserTier: fileData.userTier,
-      createdAt: Timestamp.now(),
     };
 
     const newDocRef = doc(collection(db, 'files'));
