@@ -96,9 +96,13 @@ const s3Client = new S3Client({
 });
 
 const getSubscriptionPaymentIntent = async (subscription) => {
-  const invoice = typeof subscription.latest_invoice === 'string'
-    ? await stripe.invoices.retrieve(subscription.latest_invoice, { expand: ['payment_intent'] })
+  let invoice = typeof subscription.latest_invoice === 'string'
+    ? await stripe.invoices.retrieve(subscription.latest_invoice, { expand: ['confirmation_secret', 'payment_intent'] })
     : subscription.latest_invoice;
+
+  if (invoice?.id && !invoice.confirmation_secret && !invoice.payment_intent) {
+    invoice = await stripe.invoices.retrieve(invoice.id, { expand: ['confirmation_secret', 'payment_intent'] });
+  }
 
   const paymentIntent = typeof invoice?.payment_intent === 'string'
     ? await stripe.paymentIntents.retrieve(invoice.payment_intent)
@@ -109,13 +113,14 @@ const getSubscriptionPaymentIntent = async (subscription) => {
 
 const buildSubscriptionPaymentResponse = async (subscription, customerId, message = 'Ready for subscription payment') => {
   const { invoice, paymentIntent } = await getSubscriptionPaymentIntent(subscription);
+  const confirmationSecret = invoice?.confirmation_secret?.client_secret || null;
 
-  if (paymentIntent?.client_secret) {
+  if (confirmationSecret || paymentIntent?.client_secret) {
     return {
       success: true,
       intentType: 'payment',
-      clientSecret: paymentIntent.client_secret,
-      paymentIntentId: paymentIntent.id,
+      clientSecret: confirmationSecret || paymentIntent.client_secret,
+      paymentIntentId: paymentIntent?.id || null,
       subscriptionId: subscription.id,
       customerId,
       status: subscription.status,
@@ -141,7 +146,8 @@ const buildSubscriptionPaymentResponse = async (subscription, customerId, messag
   throw new Error(
     `Stripe did not return a payment client secret for this subscription. ` +
     `Subscription status: ${subscription.status}; invoice status: ${invoice?.status || 'none'}; ` +
-    `payment intent status: ${paymentIntent?.status || 'none'}`
+    `payment intent status: ${paymentIntent?.status || 'none'}; ` +
+    `confirmation secret: ${confirmationSecret ? 'present' : 'none'}`
   );
 };
 
@@ -559,7 +565,7 @@ app.post('/api/create-subscription', async (req, res) => {
         customer: stripeCustomer.id,
         status: 'all',
         limit: 100,
-        expand: ['data.latest_invoice.payment_intent'],
+        expand: ['data.latest_invoice.confirmation_secret', 'data.latest_invoice.payment_intent'],
       });
 
       const reusableSubscription = existingSubscriptions.data.find((subscription) => {
@@ -586,7 +592,7 @@ app.post('/api/create-subscription', async (req, res) => {
           items: [{ price: priceId }],
           payment_behavior: 'default_incomplete',
           payment_settings: { save_default_payment_method: 'on_subscription' },
-          expand: ['latest_invoice.payment_intent'],
+          expand: ['latest_invoice.confirmation_secret', 'latest_invoice.payment_intent'],
           metadata: {
             userId,
             planType,
@@ -777,7 +783,7 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
         subscriptionParams.metadata.activationDate = deferredActivationDate.toISOString();
       } else {
         subscriptionParams.payment_behavior = 'default_incomplete';
-        subscriptionParams.expand = ['latest_invoice.payment_intent'];
+        subscriptionParams.expand = ['latest_invoice.confirmation_secret', 'latest_invoice.payment_intent'];
       }
 
       subscription = await stripe.subscriptions.create({
