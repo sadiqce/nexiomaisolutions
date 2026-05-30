@@ -4,7 +4,7 @@ import { getS3UploadUrl, uploadFileToS3 } from '../services/apiClient';
 import { getUser, getTopUpCredits, createFileRecord } from '../services/firestoreOperations';
 import { subscribeToUserFiles, diagnoseFiestoreData } from '../services/firestoreRealtimeService';
 import { triggerMakeScenarioForMultipleFiles } from '../services/makeService';
-import { cancelSubscription, activateScheduledPlan, checkAndActivatePendingTier } from '../services/paymentService';
+import { cancelSubscription, checkAndActivatePendingTier } from '../services/paymentService';
 import { validateUpload, checkMonthlyLimit, getTierConfig } from '../services/tierLimitService';
 import { validateDocumentPageCount } from '../utils/docxUtils';
 import FileList from '../components/dashboard/FileList';

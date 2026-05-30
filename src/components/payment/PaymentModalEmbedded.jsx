@@ -129,7 +129,8 @@ const PaymentForm = ({ userId, selectedPlan, intentType, subscriptionId, setupIn
         paymentIntentId,
         paymentMethodId,
         isDeferred,
-        deferredActivationDate
+        deferredActivationDate,
+        subscriptionData.pendingStored === true
       );
       onSuccess?.(result);
     } catch (err) {

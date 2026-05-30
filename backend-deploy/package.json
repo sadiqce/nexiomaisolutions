@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "migrate": "node migrate-csv-to-firestore.js"
+    "migrate": "node migrate-csv-to-firestore.js",
+    "process-pending-activations": "node server.js --process-pending-activations"
   },
   "keywords": [
     "stripe",

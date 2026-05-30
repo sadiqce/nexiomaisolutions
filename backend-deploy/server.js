@@ -151,6 +151,301 @@ const buildSubscriptionPaymentResponse = async (subscription, customerId, messag
   );
 };
 
+const addDays = (date, days) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+
+const parseStoredDate = (value) => {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getStripePeriodEndDate = (subscription, fallbackDate) => {
+  if (subscription?.current_period_end) {
+    return new Date(subscription.current_period_end * 1000);
+  }
+
+  return addDays(fallbackDate, 30);
+};
+
+const retrieveStripeSubscription = async (subscriptionId) => {
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ['latest_invoice.payment_intent'],
+  });
+};
+
+const validatePendingSubscription = async ({ userId, planTier, subscriptionId, activationDate }) => {
+  const subscription = await retrieveStripeSubscription(subscriptionId);
+
+  if (subscription.metadata?.userId && subscription.metadata.userId !== userId) {
+    throw new Error('Stripe subscription belongs to a different user');
+  }
+
+  if (subscription.metadata?.planType && subscription.metadata.planType !== planTier) {
+    throw new Error('Stripe subscription plan does not match requested plan');
+  }
+
+  if (!['trialing', 'active'].includes(subscription.status)) {
+    throw new Error(`Stripe subscription is not ready for deferred activation. Status: ${subscription.status}`);
+  }
+
+  const pendingActivationDate = parseStoredDate(activationDate);
+  if (!pendingActivationDate || pendingActivationDate <= new Date()) {
+    throw new Error('activationDate must be a future date');
+  }
+
+  return { subscription, pendingActivationDate };
+};
+
+const storePendingSubscriptionForUser = async ({
+  userId,
+  planTier,
+  subscriptionId,
+  activationDate,
+  stripeSubscriptionStatus,
+  source = 'api',
+}) => {
+  if (!userId || !planTier || !subscriptionId || !activationDate) {
+    throw new Error('Missing required fields: userId, planTier, subscriptionId, activationDate');
+  }
+
+  const userDoc = await db.collection('users').doc(userId).get();
+  if (!userDoc.exists) {
+    const error = new Error('User not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const { subscription, pendingActivationDate } = await validatePendingSubscription({
+    userId,
+    planTier,
+    subscriptionId,
+    activationDate,
+  });
+
+  const now = new Date();
+  const updateData = {
+    PendingTier: planTier,
+    PendingActivationDate: pendingActivationDate.toISOString(),
+    PendingSubscriptionId: subscriptionId,
+    PendingSubscriptionStatus: stripeSubscriptionStatus || subscription.status,
+    PendingSubscriptionStoredAt: now.toISOString(),
+    PendingSubscriptionSource: source,
+    UpdatedAt: now.toISOString(),
+  };
+
+  await db.collection('users').doc(userId).update(updateData);
+  const updated = await db.collection('users').doc(userId).get();
+
+  return {
+    success: true,
+    user: updated.data(),
+    subscription,
+    activationDate: pendingActivationDate.toISOString(),
+  };
+};
+
+const cancelSupersededSubscription = async (subscriptionId) => {
+  if (!subscriptionId) return null;
+
+  try {
+    const existing = await stripe.subscriptions.retrieve(subscriptionId);
+    if (['canceled', 'incomplete_expired'].includes(existing.status)) {
+      return {
+        subscriptionId,
+        status: existing.status,
+        skipped: true,
+      };
+    }
+
+    const canceled = await stripe.subscriptions.cancel(subscriptionId);
+    return {
+      subscriptionId,
+      status: canceled.status,
+      skipped: false,
+    };
+  } catch (error) {
+    if (error.code === 'resource_missing') {
+      return {
+        subscriptionId,
+        status: 'missing',
+        skipped: true,
+      };
+    }
+
+    throw error;
+  }
+};
+
+const activatePendingSubscriptionForUser = async (userId, user, { now = new Date(), source = 'manual' } = {}) => {
+  if (!user?.PendingTier || !user?.PendingActivationDate) {
+    return {
+      activated: false,
+      status: 'not_scheduled',
+      message: 'No pending tier scheduled',
+    };
+  }
+
+  const activationDate = parseStoredDate(user.PendingActivationDate);
+  if (!activationDate) {
+    return {
+      activated: false,
+      status: 'invalid_activation_date',
+      message: 'Pending activation date is invalid',
+    };
+  }
+
+  if (activationDate > now) {
+    const daysLeft = Math.ceil((activationDate - now) / (1000 * 60 * 60 * 24));
+    return {
+      activated: false,
+      status: 'scheduled',
+      message: `Pending tier activation scheduled in ${daysLeft} days`,
+      daysRemaining: daysLeft,
+    };
+  }
+
+  if (!user.PendingSubscriptionId) {
+    return {
+      activated: false,
+      status: 'missing_subscription',
+      message: 'Pending subscription ID is missing',
+    };
+  }
+
+  const pendingSubscription = await retrieveStripeSubscription(user.PendingSubscriptionId);
+  const pendingInvoice = pendingSubscription.latest_invoice;
+
+  if (pendingSubscription.status !== 'active') {
+    await db.collection('users').doc(userId).update({
+      PendingSubscriptionStatus: pendingSubscription.status,
+      PendingActivationLastCheckedAt: now.toISOString(),
+      UpdatedAt: now.toISOString(),
+    });
+
+    return {
+      activated: false,
+      status: 'stripe_not_ready',
+      stripeStatus: pendingSubscription.status,
+      invoiceStatus: pendingInvoice?.status || null,
+      message: `Stripe subscription is not active yet. Status: ${pendingSubscription.status}`,
+    };
+  }
+
+  const oldSubscriptionId = user.StripeSubscriptionId;
+  const updateData = {
+    Tier: user.PendingTier,
+    SubscriptionStatus: 'active',
+    SubscriptionStartDate: activationDate.toISOString(),
+    LastPaymentDate: now.toISOString(),
+    SubscriptionEndDate: getStripePeriodEndDate(pendingSubscription, activationDate).toISOString(),
+    StripeSubscriptionId: pendingSubscription.id,
+    StripeSubscriptionStatus: pendingSubscription.status,
+    AutoRenewal: !pendingSubscription.cancel_at_period_end,
+    PendingTier: null,
+    PendingActivationDate: null,
+    PendingSubscriptionId: null,
+    PendingSubscriptionStatus: null,
+    PendingSubscriptionStoredAt: null,
+    PendingSubscriptionSource: null,
+    PendingActivationLastCheckedAt: now.toISOString(),
+    TierActivatedDate: now.toISOString(),
+    UpdatedAt: now.toISOString(),
+  };
+
+  await db.collection('users').doc(userId).update(updateData);
+
+  let cancellation = null;
+  if (oldSubscriptionId && oldSubscriptionId !== pendingSubscription.id) {
+    try {
+      cancellation = await cancelSupersededSubscription(oldSubscriptionId);
+      await db.collection('users').doc(userId).update({
+        SupersededStripeSubscriptionId: oldSubscriptionId,
+        SupersededStripeSubscriptionStatus: cancellation?.status || null,
+        SupersededSubscriptionCancelledAt: now.toISOString(),
+        SupersededSubscriptionCancelError: null,
+        UpdatedAt: new Date().toISOString(),
+      });
+    } catch (cancelError) {
+      cancellation = {
+        subscriptionId: oldSubscriptionId,
+        error: cancelError.message,
+      };
+      await db.collection('users').doc(userId).update({
+        SupersededStripeSubscriptionId: oldSubscriptionId,
+        SupersededSubscriptionCancelError: cancelError.message,
+        UpdatedAt: new Date().toISOString(),
+      });
+      console.warn(`Could not cancel superseded subscription ${oldSubscriptionId}: ${cancelError.message}`);
+    }
+  }
+
+  const updated = await db.collection('users').doc(userId).get();
+
+  return {
+    activated: true,
+    status: 'activated',
+    source,
+    newTier: user.PendingTier,
+    subscriptionId: pendingSubscription.id,
+    oldSubscription: cancellation,
+    user: updated.data(),
+    message: `Tier upgraded to ${user.PendingTier}`,
+  };
+};
+
+const processPendingActivations = async ({ limit = process.env.PENDING_ACTIVATION_BATCH_SIZE || 100, source = 'scheduler' } = {}) => {
+  const now = new Date();
+  const parsedLimit = Number(limit);
+  const batchLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 500) : 100;
+  const snapshot = await db.collection('users')
+    .where('PendingActivationDate', '<=', now.toISOString())
+    .limit(batchLimit)
+    .get();
+
+  const summary = {
+    success: true,
+    source,
+    checkedAt: now.toISOString(),
+    scanned: snapshot.size,
+    activated: 0,
+    skipped: 0,
+    failed: 0,
+    results: [],
+  };
+
+  for (const doc of snapshot.docs) {
+    try {
+      const result = await activatePendingSubscriptionForUser(doc.id, doc.data(), { now, source });
+      if (result.activated) {
+        summary.activated += 1;
+      } else {
+        summary.skipped += 1;
+      }
+
+      summary.results.push({
+        userId: doc.id,
+        activated: result.activated,
+        status: result.status,
+        stripeStatus: result.stripeStatus || null,
+        message: result.message,
+      });
+    } catch (error) {
+      summary.failed += 1;
+      summary.results.push({
+        userId: doc.id,
+        activated: false,
+        status: 'error',
+        message: error.message,
+      });
+      console.error(`Pending activation failed for ${doc.id}:`, error);
+    }
+  }
+
+  return summary;
+};
+
 // ===== HEALTH & ROOT ENDPOINTS =====
 
 app.get('/health', (req, res) => {
@@ -267,47 +562,46 @@ app.post('/api/check-pending-activation', async (req, res) => {
     }
 
     const user = userDoc.data();
-
-    // Check if user has a pending tier
-    if (!user.PendingTier || !user.PendingActivationDate) {
-      return res.json({ 
-        activated: false, 
-        message: 'No pending tier scheduled' 
-      });
-    }
-
-    // Check if activation date has been reached
-    const now = new Date();
-    const activationDate = new Date(user.PendingActivationDate);
-    
-    if (activationDate > now) {
-      const daysLeft = Math.ceil((activationDate - now) / (1000 * 60 * 60 * 24));
-      return res.json({ 
-        activated: false, 
-        message: `Pending tier activation scheduled in ${daysLeft} days`,
-        daysRemaining: daysLeft
-      });
-    }
-
-    // Activation date reached! Update user tier
-    await db.collection('users').doc(userId).update({
-      Tier: user.PendingTier,
-      SubscriptionStatus: 'active',
-      PendingTier: null,
-      PendingActivationDate: null,
-      TierActivatedDate: now.toISOString(),
-      UpdatedAt: now.toISOString()
+    const result = await activatePendingSubscriptionForUser(userId, user, {
+      source: 'dashboard-check',
     });
 
-    const updated = await db.collection('users').doc(userId).get();
-
-    return res.json({
-      activated: true,
-      message: `Tier upgraded to ${user.PendingTier}`,
-      user: updated.data()
-    });
+    return res.json(result);
   } catch (error) {
     console.error('Error checking pending activation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/process-pending-activations - Batch process due pending subscriptions
+ * Intended for Heroku Scheduler or manual maintenance. If SCHEDULER_SECRET is set,
+ * requests must include Authorization: Bearer <secret> or x-scheduler-secret.
+ */
+app.post('/api/process-pending-activations', async (req, res) => {
+  try {
+    const schedulerSecret = process.env.SCHEDULER_SECRET;
+    if (!schedulerSecret) {
+      return res.status(503).json({
+        error: 'SCHEDULER_SECRET is not configured. Use the Heroku Scheduler CLI command instead.',
+      });
+    }
+
+    const bearerToken = req.get('Authorization')?.replace(/^Bearer\s+/i, '');
+    const headerSecret = req.get('x-scheduler-secret');
+    if (bearerToken !== schedulerSecret && headerSecret !== schedulerSecret) {
+      return res.status(401).json({ error: 'Unauthorized scheduler request' });
+    }
+
+    const requestedLimit = Number(req.body?.limit);
+    const summary = await processPendingActivations({
+      limit: Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : undefined,
+      source: 'scheduler-endpoint',
+    });
+
+    res.json(summary);
+  } catch (error) {
+    console.error('Error processing pending activations:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -676,6 +970,16 @@ app.post('/api/activate-subscription', async (req, res) => {
       return res.status(400).json({ error: 'No subscription details to activate' });
     }
 
+    const stripeSubscription = await retrieveStripeSubscription(targetSubscriptionId);
+    if (stripeSubscription.metadata?.userId && stripeSubscription.metadata.userId !== userId) {
+      return res.status(400).json({ error: 'Stripe subscription belongs to a different user' });
+    }
+    if (!['active', 'trialing'].includes(stripeSubscription.status)) {
+      return res.status(400).json({
+        error: `Stripe subscription is not active yet. Status: ${stripeSubscription.status}`,
+      });
+    }
+
     // Activate the pending tier
     const now = new Date();
     const updateData = {
@@ -683,9 +987,9 @@ app.post('/api/activate-subscription', async (req, res) => {
       SubscriptionStatus: 'active',
       SubscriptionStartDate: now.toISOString(),
       LastPaymentDate: now.toISOString(),
-      SubscriptionEndDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      SubscriptionEndDate: getStripePeriodEndDate(stripeSubscription, now).toISOString(),
       StripeSubscriptionId: targetSubscriptionId,
-      StripeSubscriptionStatus: stripeSubscriptionStatus,
+      StripeSubscriptionStatus: stripeSubscription.status || stripeSubscriptionStatus,
       AutoRenewal: true,
       PendingTier: null,
       PendingActivationDate: null,
@@ -796,6 +1100,29 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
       throw new Error(`Failed to create subscription: ${error.message}`);
     }
 
+    if (isDeferred) {
+      const pendingResult = await storePendingSubscriptionForUser({
+        userId,
+        planTier: planType,
+        subscriptionId: subscription.id,
+        activationDate,
+        stripeSubscriptionStatus: subscription.status,
+        source: 'confirm-subscription-payment',
+      });
+
+      return res.json({
+        success: true,
+        intentType: 'complete',
+        subscriptionId: subscription.id,
+        clientSecret: null,
+        status: subscription.status,
+        isDeferred: true,
+        activationDate: pendingResult.activationDate,
+        pendingStored: true,
+        message: `Pending subscription scheduled for ${new Date(pendingResult.activationDate).toLocaleDateString()}`,
+      });
+    }
+
     // Get the payment intent client secret from the subscription
     let clientSecret = null;
     try {
@@ -814,6 +1141,21 @@ app.post('/api/confirm-subscription-payment', async (req, res) => {
     } catch (error) {
       console.error('Error getting clientSecret:', error);
       // Continue anyway - subscription is created
+    }
+
+    if (!clientSecret) {
+      const responseData = await buildSubscriptionPaymentResponse(
+        subscription,
+        customerId,
+        'Subscription created and ready for payment confirmation'
+      );
+
+      return res.json({
+        ...responseData,
+        isDeferred: false,
+        activationDate: null,
+        pendingStored: false,
+      });
     }
 
     res.json({
@@ -839,46 +1181,25 @@ app.post('/api/store-pending-subscription', async (req, res) => {
   try {
     const { userId, planTier, subscriptionId, activationDate, stripeSubscriptionStatus } = req.body;
 
-    if (!userId || !planTier || !subscriptionId || !activationDate) {
-      return res.status(400).json({ error: 'Missing required fields: userId, planTier, subscriptionId, activationDate' });
-    }
-
-    // Get user from Firebase
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const pendingActivationDate = new Date(activationDate);
-    if (Number.isNaN(pendingActivationDate.getTime()) || pendingActivationDate <= new Date()) {
-      return res.status(400).json({ error: 'activationDate must be a future date' });
-    }
-
-    console.log(`✓ Storing pending subscription for user ${userId}: ${planTier} activating ${activationDate}`);
-
-    // Store the pending tier information
-    // Keep current tier active, set new tier as pending
-    const updateData = {
-      PendingTier: planTier,
-      PendingActivationDate: activationDate,
-      PendingSubscriptionId: subscriptionId,
-      PendingSubscriptionStatus: stripeSubscriptionStatus || 'active',
-      UpdatedAt: new Date().toISOString()
-    };
-
-    await db.collection('users').doc(userId).update(updateData);
-
-    const updated = await db.collection('users').doc(userId).get();
-
-    console.log(`✓ Pending subscription stored successfully`);
-    res.json({
-      success: true,
-      message: `Pending subscription scheduled for ${new Date(activationDate).toLocaleDateString()}`,
-      user: updated.data()
+    const result = await storePendingSubscriptionForUser({
+      userId,
+      planTier,
+      subscriptionId,
+      activationDate,
+      stripeSubscriptionStatus,
+      source: 'store-pending-subscription',
     });
+
+    return res.json({
+      success: true,
+      message: `Pending subscription scheduled for ${new Date(result.activationDate).toLocaleDateString()}`,
+      activationDate: result.activationDate,
+      user: result.user,
+    });
+
   } catch (error) {
     console.error('Error storing pending subscription:', error);
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -1096,10 +1417,22 @@ app.post('/api/contact', async (req, res) => {
 
 // ===== START SERVER =====
 
-app.listen(PORT, () => {
+if (process.argv.includes('--process-pending-activations')) {
+  processPendingActivations()
+    .then((summary) => {
+      console.log(JSON.stringify(summary, null, 2));
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Pending activation job failed:', error);
+      process.exit(1);
+    });
+} else {
+  app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`📍 CORS origin: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
   console.log(`🔥 Firebase Firestore connected`);
   console.log(`💳 Stripe integration active`);
   console.log(`📦 AWS S3 connected`);
-});
+  });
+}

@@ -37,9 +37,9 @@ export const getStripe = async () => {
 };
 
 /**
- * Check and activate pending tier if activation date is reached
- * This is called server-side via backend endpoint to ensure activation
- * happens even if user doesn't log in to the portal
+ * Check a pending tier and activate it through the backend if Stripe is ready.
+ * The Heroku Scheduler job is the primary path; this keeps the dashboard fresh
+ * when a user logs in after the activation date.
  * @param {string} userId - User ID
  * @returns {Promise<object>} Status of pending activation check
  */
@@ -527,7 +527,7 @@ export const activateSubscription = async (userId, planTier, subscriptionId, sub
   }
 };
 
-export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus, paymentIntentId = null, paymentMethodId = null, isDeferred = false, deferredActivationDate = null) => {
+export const processPaymentSuccess = async (userId, planTier, subscriptionId, subscriptionStatus, paymentIntentId = null, paymentMethodId = null, isDeferred = false, deferredActivationDate = null, pendingAlreadyStored = false) => {
   try {
     if (!userId || !planTier || !subscriptionId) {
       throw new Error('User ID, plan tier, and subscription ID are required');
@@ -541,6 +541,13 @@ export const processPaymentSuccess = async (userId, planTier, subscriptionId, su
     if (isDeferred) {
       console.log(`✓ Deferred billing - activating on ${deferredActivationDate}`);
       
+      if (pendingAlreadyStored) {
+        return {
+          success: true,
+          message: `Your ${planTier} plan is scheduled to activate on ${new Date(deferredActivationDate).toLocaleDateString()}. Your current plan remains active until then.`,
+        };
+      }
+
       try {
         const response = await fetch(`${STRIPE_CONFIG.backendUrl}/api/store-pending-subscription`, {
           method: 'POST',
